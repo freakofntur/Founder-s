@@ -1,12 +1,14 @@
 {
-  "name": "founder-s",
-  "version": "1.0.0",
-  "description": "A simple Electron browser app",
-  "main": "main.js",
+  "name": "founder",
+  "version": "0.1.0",
+  "description": "A browser built around search: your own browsing is the first index, the web is one click away.",
+  "main": "src/main/index.js",
+  "private": true,
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "test": "node --test"
   },
   "devDependencies": {
-    "electron": "^latest"
+    "electron": "^44.4.5"
   }
 }

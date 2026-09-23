@@ -1,0 +1,304 @@
+:root {
+  /* Keep in sync with CHROME_HEIGHT in src/main/browser-window.js */
+  --chrome-height: 84px;
+  --tabstrip-height: 38px;
+
+  --bg: #eef0f3;
+  --surface: #ffffff;
+  --surface-hover: #f4f5f7;
+  --border: #d9dce1;
+  --text: #1d2129;
+  --text-muted: #69707d;
+  --accent: #3b6cf6;
+  --accent-soft: #e5ecfe;
+  --shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1d22;
+    --surface: #2a2d34;
+    --surface-hover: #33363e;
+    --border: #3b3f48;
+    --text: #e6e8ec;
+    --text-muted: #9aa1ad;
+    --accent: #7c9cff;
+    --accent-soft: #2e3960;
+    --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* The view is transparent so it can stretch over the page while the dropdown is open. */
+html,
+body {
+  background: transparent;
+  height: 100%;
+  overflow: hidden;
+  font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text);
+  user-select: none;
+}
+
+#chrome {
+  height: var(--chrome-height);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-btn {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.icon-btn.small {
+  width: 26px;
+  height: 26px;
+}
+
+/* ---- tab strip ---- */
+
+#tabstrip {
+  height: var(--tabstrip-height);
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0 8px;
+  -webkit-app-region: drag;
+}
+#tabstrip > * {
+  -webkit-app-region: no-drag;
+}
+#tabstrip #new-tab {
+  margin-bottom: 3px;
+}
+
+#tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tab {
+  flex: 0 1 220px;
+  min-width: 48px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 10px;
+  border-radius: 8px 8px 0 0;
+  color: var(--text-muted);
+  cursor: default;
+}
+.tab:hover {
+  background: var(--surface-hover);
+}
+.tab.active {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tab-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+}
+.tab-icon.placeholder {
+  background: var(--border);
+}
+.tab.loading .tab-icon {
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  background: none;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  opacity: 0;
+}
+.tab-close svg {
+  width: 12px;
+  height: 12px;
+}
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 1;
+}
+
+/* ---- toolbar ---- */
+
+#toolbar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  background: var(--surface);
+}
+
+#reload .when-loading,
+#reload.loading .when-idle {
+  display: none;
+}
+#reload.loading .when-loading {
+  display: block;
+}
+
+#address {
+  flex: 1;
+  height: 34px;
+  margin-left: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 0 12px;
+  border-radius: 17px;
+  background: var(--bg);
+  border: 1px solid transparent;
+}
+#address:focus-within {
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.address-icon {
+  flex: none;
+  color: var(--text-muted);
+}
+
+#address-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  user-select: text;
+}
+
+#bookmark.on svg {
+  fill: #f5b400;
+  stroke: #f5b400;
+}
+
+/* ---- suggestions dropdown ---- */
+
+#backdrop {
+  position: fixed;
+  inset: var(--chrome-height) 0 0 0;
+}
+
+#suggestions {
+  position: fixed;
+  top: calc(var(--chrome-height) - 6px);
+  list-style: none;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  max-height: calc(100vh - var(--chrome-height) - 16px);
+  overflow-y: auto;
+}
+
+.suggestion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: default;
+}
+.suggestion.selected {
+  background: var(--accent-soft);
+}
+.suggestion-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.suggestion-text {
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.suggestion-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.suggestion-description {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.suggestion.answer .suggestion-title {
+  font-weight: 600;
+  font-size: 15px;
+}

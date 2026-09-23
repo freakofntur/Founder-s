@@ -1,0 +1,18 @@
+main {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20vh 24px;
+}
+h1 {
+  margin: 0 0 12px;
+}
+.url {
+  font-weight: 500;
+  word-break: break-all;
+  margin: 0 0 4px;
+}
+.actions {
+  margin-top: 28px;
+  display: flex;
+  gap: 10px;
+}

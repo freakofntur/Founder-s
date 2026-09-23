@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' founder://shared; img-src 'self' https: data:; style-src 'self' founder://shared"
+    />
+    <title>New Tab</title>
+    <link rel="stylesheet" href="founder://shared/page.css" />
+    <link rel="stylesheet" href="newtab.css" />
+  </head>
+  <body>
+    <main>
+      <h1 class="logo">Found<span>er</span></h1>
+      <form id="search" class="search-form" role="search">
+        <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="Search your web, or the web" />
+        <button class="button primary" type="submit">Search</button>
+      </form>
+
+      <section id="recent" hidden>
+        <h2>Jump back in</h2>
+        <div id="recent-list" class="tiles"></div>
+      </section>
+    </main>
+    <footer><a href="founder://settings">Settings</a></footer>
+
+    <script src="founder://shared/dom.js"></script>
+    <script src="newtab.js"></script>
+  </body>
+</html>

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' founder://shared; img-src 'self' https: data:; style-src 'self' founder://shared"
+    />
+    <title>Search</title>
+    <link rel="stylesheet" href="founder://shared/page.css" />
+    <link rel="stylesheet" href="search.css" />
+  </head>
+  <body>
+    <header>
+      <a class="logo" href="founder://newtab">Found<span>er</span></a>
+      <form id="search" class="search-form" role="search">
+        <input id="q" type="text" autocomplete="off" spellcheck="false" />
+      </form>
+    </header>
+
+    <main>
+      <p id="status" class="muted"></p>
+      <div id="sections"></div>
+    </main>
+
+    <script src="founder://shared/dom.js"></script>
+    <script src="search.js"></script>
+  </body>
+</html>

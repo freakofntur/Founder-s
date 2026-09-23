@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' founder://shared; style-src 'self' founder://shared" />
+    <title>Can't reach this page</title>
+    <link rel="stylesheet" href="founder://shared/page.css" />
+    <link rel="stylesheet" href="error.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Can't reach this page</h1>
+      <p id="url" class="url"></p>
+      <p id="description" class="muted"></p>
+      <p class="actions">
+        <button id="retry" class="button primary">Try again</button>
+        <button id="search" class="button">Search for it instead</button>
+      </p>
+    </main>
+    <script src="founder://shared/dom.js"></script>
+    <script src="error.js"></script>
+  </body>
+</html>

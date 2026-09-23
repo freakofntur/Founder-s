@@ -1,0 +1,59 @@
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 18vh 24px 48px;
+}
+
+h1 {
+  font-size: 52px;
+  text-align: center;
+  margin: 0 0 28px;
+}
+
+h2 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 48px 0 12px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.tile {
+  display: block;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  overflow: hidden;
+}
+.tile:hover {
+  text-decoration: none;
+  outline: 1px solid var(--accent);
+}
+.tile-title {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile-url {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+footer {
+  position: fixed;
+  right: 20px;
+  bottom: 14px;
+  font-size: 13px;
+}

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' founder://shared; style-src 'self' founder://shared"
+    />
+    <title>Settings</title>
+    <link rel="stylesheet" href="founder://shared/page.css" />
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Settings</h1>
+
+      <section>
+        <h2>Search</h2>
+        <label class="row">
+          <span>
+            <strong>Address bar searches with</strong>
+            <span class="muted">Founder searches your own pages first, with the web one click away.</span>
+          </span>
+          <select id="searchEngine"></select>
+        </label>
+        <label class="row">
+          <span><strong>Preferred web engine</strong></span>
+          <select id="webEngine"></select>
+        </label>
+        <label class="row">
+          <span>
+            <strong>Live suggestions from DuckDuckGo</strong>
+            <span class="muted">Sends what you type in the address bar to DuckDuckGo.</span>
+          </span>
+          <input id="remoteSuggestions" type="checkbox" />
+        </label>
+      </section>
+
+      <section>
+        <h2>Your data</h2>
+        <label class="row">
+          <span>
+            <strong>Index pages I visit</strong>
+            <span class="muted">Stored only on this device. Makes your browsing searchable.</span>
+          </span>
+          <input id="indexPages" type="checkbox" />
+        </label>
+        <div class="row">
+          <span><strong>History</strong> <span class="muted" id="history-count"></span></span>
+          <button class="button" data-clear="history">Clear</button>
+        </div>
+        <div class="row">
+          <span><strong>Search index</strong> <span class="muted" id="index-count"></span></span>
+          <button class="button" data-clear="index">Clear</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="founder://shared/dom.js"></script>
+    <script src="settings.js"></script>
+  </body>
+</html>
