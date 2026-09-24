@@ -17,4 +17,4 @@ export MOZBUILD_STATE_PATH="${MOZBUILD_STATE_PATH:-$HOME/.mozbuild}"
 ./mach build
 ./mach gradle fenix:assembleDebug
 
-find mobile/android/fenix/app/build/outputs/apk -name '*.apk' -print
+find objdir-foundry/gradle/build/mobile/android/fenix/app/outputs/apk -name "*.apk" -print
