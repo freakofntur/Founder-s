@@ -7,7 +7,7 @@ Each row gets its own ranking.
 
 ```
 ┌────────────────────────────────────────┐
-│ [>]                              [⋮]   │  controls
+│ [>]                              [⋮]   │  two menus (see Menus)
 │ ┌──────────┐ ┌──────────┐ ┌───         │
 │ │          │ │          │ │            │  UPPER ROW: small preview cards
 │ │  U1      │ │  U2      │ │ U3 …       │  scroll sideways
@@ -15,8 +15,8 @@ Each row gets its own ranking.
 │ └──────────┘ └──────────┘ └───         │
 │ ┌─┐ ┌──────────────────────────┐ ┌─┐   │
 │ │ │ │   (chat bubbles)          │ │ │   │  LOWER ROW: large AI chat cards
-│ │L│ │          L1               │ │L│   │  swipe sideways
-│ │0│ │                           │ │2│   │  (neighbours peek at the edges)
+│ │L│ │          L2               │ │L│   │  swipe sideways
+│ │1│ │                           │ │3│   │  (neighbours peek at the edges)
 │ │ │ │ ( xyz  ← follow-up input )│ │ │   │
 │ └─┘ └──────────────────────────┘ └─┘   │
 │ (        xyz  ← address/search bar   ) │  bottom bar
@@ -32,6 +32,10 @@ Slots are numbered **separately in each row**, and the number is the slot's posi
 | **U1, U2, U3 …** | Upper | Small preview cards, left to right. **U1** is the first card, fully visible without scrolling. |
 | **L1, L2, L3 …** | Lower | Large AI chat cards. **L1** is the card in front when the screen opens. L2, L3 … follow when you swipe left. |
 
+In the sketch the lower row has already been swiped left once. **L2** (ChatGPT) is in front, **L1** (Claude) peeks on
+the left and **L3** (Gemini) peeks on the right. The cut-off card at the right end of the upper row means more U-cards
+are waiting to the right.
+
 The priority system fills U-slots and L-slots independently, so reordering one row never moves the other. A service
 always belongs to one row.
 
@@ -43,18 +47,32 @@ always belongs to one row.
 | Upper | Info | G | Google web results |
 | Upper | Images | — | Google Images |
 | Upper | Recommended pages | — | Pages Gemini recommends |
-| Lower | ChatGPT | OpenAI knot (centre card) | chatgpt.com with the query |
-| Lower | Gemini | G (left edge) | gemini.google.com with the query |
-| Lower | Claude | orange (right edge) | claude.ai with the query |
+| Lower | Claude | left edge in sketch (L1) | claude.ai with the query |
+| Lower | ChatGPT | OpenAI knot, centre card (L2) | chatgpt.com with the query |
+| Lower | Gemini | right edge in sketch (L3) | gemini.google.com with the query |
 | Lower | Grok | — | grok.com with the query |
 
 Each card shows that service's real page. The service-pages approach was agreed, so there are no APIs and your existing
 logins work.
 
-## Open questions
+## Interactions
 
-- **`>` (top left):** is it collapse/expand, back, or a sidebar?
-- **`⋮` (top right):** is it a menu, or choose/reorder services?
-- **Tapping an upper card:** does it open full screen, or swap into the big lower area?
-- **Lower input pill (`xyz`):** does a follow-up go only to that AI, or to every AI card at once?
-- **Second mockup below the first:** is it a different state, such as a collapsed upper row?
+- **Swipe left or right on a row** to reveal more cards in that row. Each row scrolls on its own.
+- **Scroll inside a card** to scroll that service's page without leaving the results screen.
+- **Tap a card** to open it full screen. The results screen stays open in the background like a tab, with its other
+  cards kept as they were, so you can go back to it.
+- **The follow-up box in an AI card** sends the message to that AI only.
+
+## Menus
+
+The two menus may move later.
+
+| Button | Holds |
+|---|---|
+| **`>`** | Profile, saved and active tabs, reading lists |
+| **`⋮`** | A traditional browser menu (settings, history, downloads and so on) |
+
+## Later
+
+- **Ask several AIs at once.** A follow-up is sent to more than one AI card. The second, cut-off mockup in the
+  reference photo sketches this.
