@@ -119,6 +119,196 @@ index 2d733a28d4..dd23ba5599 100644
      }
  
      @OptIn(ExperimentalCoroutinesApi::class)
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryAngleGuide.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryAngleGuide.kt
+new file mode 100644
+index 0000000000..23e5ecb5c0
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryAngleGuide.kt
+@@ -0,0 +1,184 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.components.toolbar.gestures
++
++import android.animation.ValueAnimator
++import android.app.Activity
++import android.graphics.Canvas
++import android.graphics.Color
++import android.graphics.Paint
++import android.graphics.Path
++import android.graphics.PointF
++import android.graphics.RadialGradient
++import android.graphics.RectF
++import android.graphics.Shader
++import android.view.View
++import android.view.ViewGroup
++import androidx.core.animation.doOnEnd
++import androidx.core.graphics.ColorUtils
++
++/**
++ * Shows, from where a toolbar swipe starts, the two sideways wedges (±[angle] degrees from horizontal) inside which
++ * the swipe means back/forward. The wedges fade out towards their edge, fade as the finger travels, and the one the
++ * finger is heading into is emphasised.
++ *
++ * @param angle Half the opening of each wedge, in degrees; the same threshold the gesture is classified with.
++ */
++class FoundryAngleGuide(private val activity: Activity, private val angle: Float) {
++    private val density = activity.resources.displayMetrics.density
++    private val radius = RADIUS_DP * density
++    private val color = Color.parseColor(BRAND_COLOR)
++
++    private var view: GuideView? = null
++    private var animator: ValueAnimator? = null
++    private var dismissing = false
++
++    /** @param start The raw screen position where the swipe started. */
++    fun show(start: PointF) {
++        remove()
++        val root = activity.window.decorView as? ViewGroup ?: return
++        val guide = GuideView(start)
++        root.addView(guide, ViewGroup.LayoutParams(MATCH, MATCH))
++        view = guide
++        dismissing = false
++        animate(guide, from = 0f, to = 1f, duration = APPEAR_MS) { }
++    }
++
++    /**
++     * @param dx Horizontal finger movement since the start, in pixels.
++     * @param distance Total finger movement since the start, in pixels.
++     * @param committed Whether the swipe has been recognised as back/forward.
++     */
++    fun update(dx: Float, distance: Float, committed: Boolean) {
++        val guide = view ?: return
++        val towardsRight = if (dx > 0) 1f else if (dx < 0) 0f else HALF
++        guide.rightEmphasis = if (committed) towardsRight else HALF + (towardsRight - HALF) * UNDECIDED_LEAN
++        guide.travelFade = (1f - distance / (FADE_TRAVEL_DP * density)).coerceIn(0f, 1f)
++        guide.invalidate()
++    }
++
++    fun dismiss(quick: Boolean = false) {
++        val guide = view ?: return
++        if (dismissing) return
++        dismissing = true
++        animate(guide, from = guide.appear, to = 0f, duration = if (quick) QUICK_DISMISS_MS else DISMISS_MS) {
++            if (view === guide) remove()
++        }
++    }
++
++    private fun animate(guide: GuideView, from: Float, to: Float, duration: Long, onEnd: () -> Unit) {
++        animator?.cancel()
++        animator =
++            ValueAnimator.ofFloat(from, to).apply {
++                this.duration = duration
++                addUpdateListener {
++                    guide.appear = it.animatedValue as Float
++                    guide.invalidate()
++                }
++                doOnEnd { onEnd() }
++                start()
++            }
++    }
++
++    private fun remove() {
++        animator?.cancel()
++        animator = null
++        view?.let { (it.parent as? ViewGroup)?.removeView(it) }
++        view = null
++    }
++
++    private inner class GuideView(private val start: PointF) : View(activity) {
++        var appear = 0f
++        var travelFade = 1f
++        var rightEmphasis = HALF
++
++        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
++        private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
++            style = Paint.Style.STROKE
++            strokeWidth = EDGE_DP * density
++        }
++        private val location = IntArray(2)
++        private val oval = RectF()
++        private val path = Path()
++
++        init {
++            isClickable = false
++            isFocusable = false
++            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
++        }
++
++        override fun onDraw(canvas: Canvas) {
++            val visibility = appear * travelFade
++            if (visibility <= 0f) return
++            getLocationOnScreen(location)
++            val cx = start.x - location[0]
++            val cy = start.y - location[1]
++            oval.set(cx - radius, cy - radius, cx + radius, cy + radius)
++
++            fill.shader = gradient(cx, cy, FILL_ALPHA)
++            edge.shader = gradient(cx, cy, EDGE_ALPHA)
++            drawWedge(canvas, cx, cy, 0f, visibility * emphasis(rightEmphasis))
++            drawWedge(canvas, cx, cy, STRAIGHT, visibility * emphasis(1f - rightEmphasis))
++        }
++
++        private fun emphasis(share: Float) = MIN_EMPHASIS + (1f - MIN_EMPHASIS) * share
++
++        private fun drawWedge(canvas: Canvas, cx: Float, cy: Float, direction: Float, alpha: Float) {
++            val a = (alpha.coerceIn(0f, 1f) * OPAQUE).toInt()
++            if (a == 0) return
++            path.reset()
++            path.moveTo(cx, cy)
++            path.arcTo(oval, direction - angle, angle * 2)
++            path.close()
++            fill.alpha = a
++            edge.alpha = a
++            canvas.drawPath(path, fill)
++            canvas.drawPath(path, edge)
++        }
++
++        private fun gradient(cx: Float, cy: Float, alpha: Float) =
++            RadialGradient(
++                cx,
++                cy,
++                radius,
++                intArrayOf(
++                    ColorUtils.setAlphaComponent(color, (alpha * OPAQUE).toInt()),
++                    ColorUtils.setAlphaComponent(color, (alpha * MID_ALPHA * OPAQUE).toInt()),
++                    Color.TRANSPARENT,
++                ),
++                floatArrayOf(0f, MID_STOP, 1f),
++                Shader.TileMode.CLAMP,
++            )
++    }
++
++    private companion object {
++        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
++        const val OPAQUE = 255
++        const val HALF = 0.5f
++        const val STRAIGHT = 180f
++        const val BRAND_COLOR = "#2B50E0"
++
++        /** How far the wedges reach before fully fading out. */
++        const val RADIUS_DP = 180f
++
++        /** Finger travel over which the guide fades away during the swipe. */
++        const val FADE_TRAVEL_DP = 160f
++
++        /** Before the direction is decided, how much the wedge the finger leans towards is emphasised. */
++        const val UNDECIDED_LEAN = 0.4f
++
++        /** Opacity of the wedge the finger is not heading into, relative to the other. */
++        const val MIN_EMPHASIS = 0.25f
++
++        const val FILL_ALPHA = 0.32f
++        const val EDGE_ALPHA = 0.9f
++        const val MID_ALPHA = 0.45f
++        const val MID_STOP = 0.55f
++        const val EDGE_DP = 1.5f
++        const val APPEAR_MS = 90L
++        const val DISMISS_MS = 220L
++        const val QUICK_DISMISS_MS = 120L
++    }
++}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryPageSnapshots.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryPageSnapshots.kt
 new file mode 100644
 index 0000000000..dfade5fcbf
@@ -527,10 +717,10 @@ index 0000000000..fd6bcd1e24
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt
 new file mode 100644
-index 0000000000..8464676de2
+index 0000000000..9c700e3c70
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt
-@@ -0,0 +1,315 @@
+@@ -0,0 +1,330 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -584,6 +774,8 @@ index 0000000000..8464676de2
 + * @param page The view that slides for back/forward (the web content, not the toolbar).
 + * @param tabSwitcher The card tab switcher, or null to disable the upward gesture.
 + * @param onSwipeStarted Called when a swipe is recognised, e.g. to capture a thumbnail.
++ *
++ * A [FoundryAngleGuide] shows the sideways zones while the swipe is under way.
 + */
 +@Suppress("LongParameterList", "TooManyFunctions")
 +class FoundryToolbarGesturesHandler(
@@ -609,6 +801,7 @@ index 0000000000..8464676de2
 +    private var dy = 0f
 +    private var startedInSystemGestureInset = false
 +    private var underlay: FrameLayout? = null
++    private val angleGuide = FoundryAngleGuide(activity, SIDEWAYS_MAX_ANGLE.toFloat())
 +
 +    override fun onSwipeStarted(start: PointF, next: PointF): Boolean {
 +        if (activity.window.decorView.isKeyboardVisible() || !start.isInBars()) {
@@ -618,7 +811,9 @@ index 0000000000..8464676de2
 +        dx = next.x - start.x
 +        dy = next.y - start.y
 +        startedInSystemGestureInset = start.isInSystemGestureInset()
++        angleGuide.show(start)
 +        classifyWhenReady()
++        updateAngleGuide()
 +        return true
 +    }
 +
@@ -626,6 +821,7 @@ index 0000000000..8464676de2
 +        dx -= distanceX
 +        dy -= distanceY
 +        classifyWhenReady()
++        updateAngleGuide()
 +
 +        when (mode) {
 +            Mode.BACK_FORWARD -> updateBackForward()
@@ -641,7 +837,16 @@ index 0000000000..8464676de2
 +                tabSwitcher?.finish(velocityX, if (toolbarPosition == ToolbarPosition.BOTTOM) -velocityY else velocityY)
 +            else -> Unit
 +        }
++        angleGuide.dismiss()
 +        mode = Mode.UNDECIDED
++    }
++
++    private fun updateAngleGuide() {
++        when (mode) {
++            Mode.UNDECIDED -> angleGuide.update(dx, hypot(dx, dy), committed = false)
++            Mode.BACK_FORWARD -> angleGuide.update(dx, hypot(dx, dy), committed = true)
++            else -> angleGuide.dismiss(quick = true)
++        }
 +    }
 +
 +    private fun classifyWhenReady() {
@@ -806,7 +1011,7 @@ index 0000000000..8464676de2
 +        const val DECIDE_DP = 12f
 +
 +        /** Swipes within this many degrees of horizontal are back/forward; steeper upward swipes open the switcher. */
-+        const val SIDEWAYS_MAX_ANGLE = 35.0
++        const val SIDEWAYS_MAX_ANGLE = 20.0
 +
 +        /** Where the finger would be this long after release is where the gesture is judged to have ended. */
 +        const val MOMENTUM_SECONDS = 0.15f
