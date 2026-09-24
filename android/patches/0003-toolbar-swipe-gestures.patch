@@ -1,19 +1,20 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BrowserFragment.kt
-index 2d733a28d4..840fec78d2 100644
+index 2d733a28d4..d754ec2dc4 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BrowserFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BrowserFragment.kt
-@@ -61,8 +61,8 @@ import org.mozilla.fenix.components.appstate.AppAction.SnackbarAction
+@@ -61,8 +61,9 @@ import org.mozilla.fenix.components.appstate.AppAction.SnackbarAction
  import org.mozilla.fenix.components.metrics.installSourcePackage
  import org.mozilla.fenix.components.share.isSystemShareSheetSupported
  import org.mozilla.fenix.components.toolbar.ToolbarPosition
 -import org.mozilla.fenix.components.toolbar.gestures.ToolbarHorizontalGesturesHandler
 -import org.mozilla.fenix.components.toolbar.gestures.ToolbarVerticalGesturesHandler
++import org.mozilla.fenix.components.toolbar.gestures.FoundryTabSwitcher
 +import org.mozilla.fenix.components.toolbar.gestures.FoundryToolbarGesturesHandler
 +import org.mozilla.fenix.components.toolbar.gestures.showTabsTrayFromToolbar
  import org.mozilla.fenix.compose.snackbar.Snackbar
  import org.mozilla.fenix.compose.snackbar.SnackbarState
  import org.mozilla.fenix.e2e.SystemInsetsPaddedFragment
-@@ -209,38 +209,35 @@ class BrowserFragment : BaseBrowserFragment(), UserInteractionHandler, SystemIns
+@@ -209,38 +210,41 @@ class BrowserFragment : BaseBrowserFragment(), UserInteractionHandler, SystemIns
      }
  
      private fun setupToolbarSwipeBehavior(settings: Settings, components: Components) {
@@ -25,7 +26,13 @@ index 2d733a28d4..840fec78d2 100644
 -                    tabPreview = binding.tabPreview,
 -                    toolbarLayoutRect = { browserToolbar.layout.getRectWithScreenLocation() },
 -                    navBarLayoutRect = { browserNavigationBar?.layout?.getRectWithScreenLocation() },
--                    store = components.core.store,
++        // Foundry: sideways swipes on the address bar go back/forward; swiping up opens the card tab switcher.
++        val navController = findNavController()
++        val tabSwitcher =
++            if (settings.isSwipeToolbarToShowTabsEnabled) {
++                FoundryTabSwitcher(
++                    container = binding.gestureLayout,
+                     store = components.core.store,
 -                    selectTabUseCase = components.useCases.tabsUseCases.selectTab,
 -                    onSwipeStarted = {
 -                        thumbnailsFeature
@@ -33,25 +40,7 @@ index 2d733a28d4..840fec78d2 100644
 -                            ?.requestScreenshot(
 -                                trigger = BrowserThumbnailsFacts.CaptureAttemptedTriggers.SWIPE_TO_SWITCH_TABS
 -                            )
-+        // Foundry: one handler for all address bar swipes. Sideways goes back/forward, straight up opens the tabs
-+        // tray and diagonally up switches tabs.
-+        val navController = findNavController()
-+        binding.gestureLayout.addGestureListener(
-+            FoundryToolbarGesturesHandler(
-+                activity = requireActivity(),
-+                contentLayout = binding.browserLayout,
-+                toolbarLayoutRect = { browserToolbar.layout.getRectWithScreenLocation() },
-+                navBarLayoutRect = { browserNavigationBar?.layout?.getRectWithScreenLocation() },
-+                toolbarPosition = settings.toolbarPosition,
-+                store = components.core.store,
-+                sessionUseCases = components.useCases.sessionUseCases,
-+                selectTabUseCase = components.useCases.tabsUseCases.selectTab,
-+                onShowTabs =
-+                    if (settings.isSwipeToolbarToShowTabsEnabled) {
-+                        { navController.showTabsTrayFromToolbar(components.appStore) }
-+                    } else {
-+                        null
-                     },
+-                    },
 -                )
 -            )
 -        }
@@ -64,9 +53,26 @@ index 2d733a28d4..840fec78d2 100644
 -                    navBarLayout = browserNavigationBar?.layout,
 -                    toolbarPosition = settings.toolbarPosition,
 -                    navController = findNavController(),
--                )
-+                canSwitchTabs = !settings.isTabStripEnabled && settings.isSwipeToolbarToSwitchTabsEnabled,
-+                onSwitchTabsStarted = {
++                    captureCurrent = { onCaptured -> binding.engineView.captureThumbnail(onCaptured) },
++                    onSelectTab = { tab -> components.useCases.tabsUseCases.selectTab(tab.id) },
++                    onShowTabsTray = { navController.showTabsTrayFromToolbar(components.appStore) },
++                    toolbarAtBottom = settings.toolbarPosition == ToolbarPosition.BOTTOM,
+                 )
++            } else {
++                null
++            }
++        binding.gestureLayout.addGestureListener(
++            FoundryToolbarGesturesHandler(
++                activity = requireActivity(),
++                contentLayout = binding.browserLayout,
++                overlayContainer = binding.gestureLayout,
++                toolbarLayoutRect = { browserToolbar.layout.getRectWithScreenLocation() },
++                navBarLayoutRect = { browserNavigationBar?.layout?.getRectWithScreenLocation() },
++                toolbarPosition = settings.toolbarPosition,
++                store = components.core.store,
++                sessionUseCases = components.useCases.sessionUseCases,
++                tabSwitcher = tabSwitcher,
++                onSwipeStarted = {
 +                    thumbnailsFeature
 +                        .get()
 +                        ?.requestScreenshot(
@@ -79,12 +85,300 @@ index 2d733a28d4..840fec78d2 100644
      }
  
      @OptIn(ExperimentalCoroutinesApi::class)
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryTabSwitcher.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryTabSwitcher.kt
+new file mode 100644
+index 0000000000..1d01e67cd2
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryTabSwitcher.kt
+@@ -0,0 +1,282 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.components.toolbar.gestures
++
++import android.animation.ValueAnimator
++import android.graphics.Bitmap
++import android.graphics.Color
++import android.graphics.Outline
++import android.text.TextUtils
++import android.util.TypedValue
++import android.view.Gravity
++import android.view.View
++import android.view.ViewGroup
++import android.view.ViewOutlineProvider
++import android.widget.FrameLayout
++import android.widget.ImageView
++import android.widget.TextView
++import androidx.core.animation.doOnEnd
++import androidx.interpolator.view.animation.FastOutSlowInInterpolator
++import kotlin.math.abs
++import kotlin.math.roundToInt
++import mozilla.components.browser.state.selector.getNormalOrPrivateTabs
++import mozilla.components.browser.state.selector.selectedTab
++import mozilla.components.browser.state.state.TabSessionState
++import mozilla.components.browser.state.store.BrowserStore
++import mozilla.components.browser.thumbnails.loader.ThumbnailLoader
++import mozilla.components.concept.base.images.ImageLoadRequest
++import org.mozilla.fenix.ext.components
++
++/**
++ * The card-based tab switcher driven by the toolbar's upward swipe, in the style of Android's recent apps.
++ *
++ * While the finger is down the current page shrinks into a card that follows it, with the neighbouring tabs beside
++ * it; moving sideways slides through them. On release the centred card opens full screen, or, if it is still the
++ * current tab, the full tabs tray opens.
++ *
++ * @param container The view the overlay is drawn over, normally the fragment's [SwipeGestureLayout].
++ * @param captureCurrent Delivers a snapshot of the current page, used for the current tab's card.
++ * @param onSelectTab Switches to the chosen tab.
++ * @param onShowTabsTray Opens the full tabs tray.
++ * @param toolbarAtBottom Whether the gesture comes from the bottom of the screen (true) or the top.
++ */
++@Suppress("TooManyFunctions")
++class FoundryTabSwitcher(
++    private val container: ViewGroup,
++    private val store: BrowserStore,
++    private val captureCurrent: ((Bitmap?) -> Unit) -> Unit,
++    private val onSelectTab: (TabSessionState) -> Unit,
++    private val onShowTabsTray: () -> Unit,
++    private val toolbarAtBottom: Boolean,
++) {
++    private class Card(val index: Int, val tab: TabSessionState, val root: FrameLayout, val title: TextView)
++
++    private val context = container.context
++    private val density = context.resources.displayMetrics.density
++    private val thumbnailLoader = ThumbnailLoader(context.components.core.thumbnailStorage)
++
++    private var overlay: FrameLayout? = null
++    private var cards = emptyList<Card>()
++    private var tabs = emptyList<TabSessionState>()
++    private var currentIndex = 0
++    private var animator: ValueAnimator? = null
++
++    /** Distance the finger has moved away from the toolbar edge. */
++    private var travel = 0f
++
++    /** Fractional index of the tab in the middle of the screen. */
++    private var position = 0f
++
++    val isActive: Boolean
++        get() = overlay != null
++
++    fun start() {
++        cancelAnimation()
++        removeOverlay()
++        val current = store.state.selectedTab ?: return
++        tabs = store.state.getNormalOrPrivateTabs(current.content.private)
++        currentIndex = tabs.indexOfFirst { it.id == current.id }.coerceAtLeast(0)
++        position = currentIndex.toFloat()
++        travel = 0f
++
++        val root = FrameLayout(context).apply { setBackgroundColor(Color.TRANSPARENT) }
++        container.addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, MATCH))
++        overlay = root
++
++        val first = (currentIndex - WINDOW).coerceAtLeast(0)
++        val last = (currentIndex + WINDOW).coerceAtMost(tabs.lastIndex)
++        cards = (first..last).map { index -> buildCard(root, index, tabs[index]) }
++        render()
++    }
++
++    /**
++     * @param sideways Horizontal finger movement since the gesture started, in pixels.
++     * @param away Finger movement away from the toolbar edge, in pixels.
++     */
++    fun update(sideways: Float, away: Float) {
++        if (!isActive) return
++        travel = away.coerceAtLeast(0f)
++        position = (currentIndex - sideways / spacing()).coerceIn(firstCardIndex(), lastCardIndex())
++        render()
++    }
++
++    fun finish(velocityX: Float) {
++        if (!isActive) return
++        var target = position.roundToInt()
++        if (target == currentIndex && abs(velocityX) > FLING_VELOCITY * density) {
++            target = if (velocityX < 0) currentIndex + 1 else currentIndex - 1
++        }
++        target = target.coerceIn(firstCardIndex().toInt(), lastCardIndex().toInt())
++
++        when {
++            target != currentIndex -> animateTo(target.toFloat(), 0f) {
++                onSelectTab(tabs[target])
++                container.postDelayed({ fadeOutAndRemove() }, SETTLE_AFTER_SWITCH_MS)
++            }
++            progress() < CANCEL_PROGRESS -> animateTo(currentIndex.toFloat(), 0f) { removeOverlay() }
++            else -> {
++                onShowTabsTray()
++                fadeOutAndRemove()
++            }
++        }
++    }
++
++    fun cancel() {
++        if (!isActive) return
++        animateTo(currentIndex.toFloat(), 0f) { removeOverlay() }
++    }
++
++    private fun buildCard(parent: FrameLayout, index: Int, tab: TabSessionState): Card {
++        val radius = CARD_CORNER_DP * density
++        val card =
++            FrameLayout(context).apply {
++                setBackgroundColor(Color.WHITE)
++                clipToOutline = true
++                outlineProvider =
++                    object : ViewOutlineProvider() {
++                        override fun getOutline(view: View, outline: Outline) {
++                            // Corners are sized for the scaled card so they look the same at any size.
++                            val scaled = radius / view.scaleX.coerceAtLeast(MIN_SCALE)
++                            outline.setRoundRect(0, 0, view.width, view.height, scaled)
++                        }
++                    }
++                elevation = CARD_ELEVATION_DP * density
++            }
++        val image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
++        card.addView(image, FrameLayout.LayoutParams(MATCH, MATCH))
++        parent.addView(card, FrameLayout.LayoutParams(container.widthOrScreen(), container.heightOrScreen()))
++
++        if (index == currentIndex) {
++            captureCurrent { bitmap -> bitmap?.let { image.setImageBitmap(it) } }
++        }
++        image.post {
++            if (index != currentIndex || image.drawable == null) {
++                thumbnailLoader.loadIntoView(
++                    image,
++                    ImageLoadRequest(tab.id, maxOf(image.width, image.height), tab.content.private),
++                )
++            }
++        }
++
++        val title =
++            TextView(context).apply {
++                text = tab.content.title.ifBlank { tab.content.url }
++                setTextColor(Color.WHITE)
++                setTextSize(TypedValue.COMPLEX_UNIT_SP, TITLE_TEXT_SP)
++                maxLines = 1
++                ellipsize = TextUtils.TruncateAt.END
++                gravity = Gravity.CENTER
++                alpha = 0f
++            }
++        parent.addView(title, FrameLayout.LayoutParams(container.widthOrScreen(), ViewGroup.LayoutParams.WRAP_CONTENT))
++        return Card(index, tab, card, title)
++    }
++
++    private fun render() {
++        val root = overlay ?: return
++        val p = progress()
++        val scale = 1f - (1f - MIN_SCALE) * p
++        val height = container.heightOrScreen().toFloat()
++        val spacing = spacing(scale)
++        // Keep the card's bottom (or top, for a top toolbar) edge under the finger.
++        val edgeOffset = height / 2 * (1 - scale)
++        val offsetY = if (toolbarAtBottom) edgeOffset - travel else travel - edgeOffset
++
++        root.setBackgroundColor(Color.argb((SCRIM_ALPHA * (p * SCRIM_RAMP).coerceAtMost(1f)).toInt(), 0, 0, 0))
++        for (card in cards) {
++            val x = (card.index - position) * spacing
++            card.root.apply {
++                pivotX = width / 2f
++                pivotY = height / 2f
++                scaleX = scale
++                scaleY = scale
++                translationX = x
++                translationY = offsetY
++                invalidateOutline()
++            }
++            card.title.apply {
++                translationX = x
++                translationY = card.root.top + height / 2 * (1 - scale) + offsetY - this.height - TITLE_GAP_DP * density
++                this.alpha = (p * 2f - 0.4f).coerceIn(0f, 1f)
++            }
++        }
++    }
++
++    private fun animateTo(targetPosition: Float, targetTravel: Float, onEnd: () -> Unit) {
++        cancelAnimation()
++        val startPosition = position
++        val startTravel = travel
++        animator =
++            ValueAnimator.ofFloat(0f, 1f).apply {
++                duration = SNAP_DURATION_MS
++                interpolator = FastOutSlowInInterpolator()
++                addUpdateListener {
++                    val f = it.animatedValue as Float
++                    position = startPosition + (targetPosition - startPosition) * f
++                    travel = startTravel + (targetTravel - startTravel) * f
++                    render()
++                }
++                doOnEnd { onEnd() }
++                start()
++            }
++    }
++
++    private fun fadeOutAndRemove() {
++        val root = overlay ?: return
++        root.animate().alpha(0f).setDuration(FADE_DURATION_MS).withEndAction { removeOverlay() }.start()
++    }
++
++    private fun removeOverlay() {
++        overlay?.let { container.removeView(it) }
++        overlay = null
++        cards = emptyList()
++    }
++
++    private fun cancelAnimation() {
++        animator?.cancel()
++        animator = null
++    }
++
++    private fun progress(): Float = (travel / (container.heightOrScreen() * FULL_SHRINK_FRACTION)).coerceIn(0f, 1f)
++
++    private fun spacing(scale: Float = 1f - (1f - MIN_SCALE) * progress()): Float =
++        container.widthOrScreen() * scale + CARD_GAP_DP * density
++
++    private fun firstCardIndex() = cards.firstOrNull()?.index?.toFloat() ?: currentIndex.toFloat()
++
++    private fun lastCardIndex() = cards.lastOrNull()?.index?.toFloat() ?: currentIndex.toFloat()
++
++    private fun View.widthOrScreen() = if (width > 0) width else resources.displayMetrics.widthPixels
++
++    private fun View.heightOrScreen() = if (height > 0) height else resources.displayMetrics.heightPixels
++
++    private companion object {
++        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
++
++        /** Tabs shown on each side of the current one. */
++        const val WINDOW = 4
++
++        /** Smallest size of a card, as a fraction of the screen. */
++        const val MIN_SCALE = 0.55f
++
++        /** How far (as a fraction of the screen height) the finger travels to shrink the card fully. */
++        const val FULL_SHRINK_FRACTION = 0.35f
++
++        /** Below this much shrinking, releasing on the current tab just restores it. */
++        const val CANCEL_PROGRESS = 0.15f
++
++        const val CARD_GAP_DP = 16f
++        const val CARD_CORNER_DP = 20f
++        const val CARD_ELEVATION_DP = 8f
++        const val TITLE_GAP_DP = 8f
++        const val TITLE_TEXT_SP = 14f
++        const val SCRIM_ALPHA = 230f
++        const val SCRIM_RAMP = 3f
++        const val FLING_VELOCITY = 800f
++        const val SNAP_DURATION_MS = 260L
++        const val FADE_DURATION_MS = 150L
++        const val SETTLE_AFTER_SWITCH_MS = 120L
++    }
++}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt
 new file mode 100644
-index 0000000000..a3fa03e9c9
+index 0000000000..550a7da737
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt
-@@ -0,0 +1,250 @@
+@@ -0,0 +1,289 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -92,10 +386,17 @@ index 0000000000..a3fa03e9c9
 +package org.mozilla.fenix.components.toolbar.gestures
 +
 +import android.app.Activity
++import android.content.res.ColorStateList
++import android.graphics.Color
 +import android.graphics.PointF
 +import android.graphics.Rect
++import android.graphics.drawable.GradientDrawable
++import android.view.Gravity
 +import android.view.View
 +import android.view.ViewConfiguration
++import android.view.ViewGroup
++import android.widget.FrameLayout
++import android.widget.ImageView
 +import androidx.core.graphics.contains
 +import androidx.core.graphics.toPoint
 +import androidx.core.view.ViewCompat
@@ -104,13 +405,9 @@ index 0000000000..a3fa03e9c9
 +import kotlin.math.abs
 +import kotlin.math.atan2
 +import kotlin.math.hypot
-+import mozilla.components.browser.state.selector.getNormalOrPrivateTabs
 +import mozilla.components.browser.state.selector.selectedTab
-+import mozilla.components.browser.state.state.TabSessionState
-+import mozilla.components.browser.state.state.isActive
 +import mozilla.components.browser.state.store.BrowserStore
 +import mozilla.components.feature.session.SessionUseCases
-+import mozilla.components.feature.tabs.TabsUseCases
 +import mozilla.components.support.utils.ext.bottom
 +import mozilla.components.support.utils.ext.getWindowInsets
 +import mozilla.components.support.utils.ext.isKeyboardVisible
@@ -123,53 +420,52 @@ index 0000000000..a3fa03e9c9
 +import org.mozilla.fenix.browser.browsingmode.BrowsingMode
 +import org.mozilla.fenix.components.AppStore
 +import org.mozilla.fenix.components.toolbar.ToolbarPosition
-+import org.mozilla.fenix.ext.maxActiveTime
 +import org.mozilla.fenix.ext.nav
 +import org.mozilla.fenix.tabstray.redux.state.Page
++import mozilla.components.ui.icons.R as iconsR
 +
 +/**
 + * Foundry's address bar gestures. One handler owns every swipe that starts on the toolbar (or navigation bar) and
 + * decides what it means once the finger has moved far enough to read a direction:
 + *
-+ * - **Sideways**: back (finger moves right) or forward (finger moves left); mirrored for right-to-left layouts.
-+ * - **Straight up**: open the tabs tray.
-+ * - **Diagonally up**: switch tabs. Up-left goes to the next tab and up-right to the previous one, the same sense as
-+ *   Firefox's sideways tab swipe (the page slides the way the finger moves).
++ * - **Sideways**: back (finger moves right) or forward (finger moves left), mirrored for right-to-left layouts. The page
++ *   follows the finger and an arrow appears at the edge it is being pulled from.
++ * - **Up** (away from the toolbar's screen edge): the [FoundryTabSwitcher], which shrinks the page into a card that
++ *   follows the finger.
 + *
-+ * "Up" means away from the toolbar's screen edge, so with a top toolbar it is a downward swipe.
-+ *
-+ * @param onShowTabs Opens the tabs tray, or null to disable the straight-up gesture.
-+ * @param canSwitchTabs Whether the diagonal tab-switch gesture is enabled.
-+ * @param onSwitchTabsStarted Called when a diagonal swipe begins, e.g. to capture a thumbnail for the tabs tray.
-+ * @param onTabSwitched Called after a diagonal swipe selected another tab.
++ * @param overlayContainer Where the back/forward arrow is drawn.
++ * @param tabSwitcher The card tab switcher, or null to disable the upward gesture.
++ * @param onSwipeStarted Called when a tab-switcher swipe begins, e.g. to capture a thumbnail for the tabs tray.
 + */
 +@Suppress("LongParameterList")
 +class FoundryToolbarGesturesHandler(
 +    private val activity: Activity,
 +    private val contentLayout: View,
++    private val overlayContainer: ViewGroup,
 +    private val toolbarLayoutRect: () -> Rect?,
 +    private val navBarLayoutRect: () -> Rect?,
 +    private val toolbarPosition: ToolbarPosition,
 +    private val store: BrowserStore,
 +    private val sessionUseCases: SessionUseCases,
-+    private val selectTabUseCase: TabsUseCases.SelectTabUseCase,
-+    private val onShowTabs: (() -> Unit)?,
-+    private val canSwitchTabs: Boolean,
-+    private val onSwitchTabsStarted: () -> Unit = {},
-+    private val onTabSwitched: (TabSessionState) -> Unit = {},
++    private val tabSwitcher: FoundryTabSwitcher?,
++    private val onSwipeStarted: () -> Unit = {},
 +) : SwipeGestureListener {
 +
-+    private enum class Mode { UNDECIDED, BACK_FORWARD, SHOW_TABS, SWITCH_TABS, IGNORED }
++    private enum class Mode { UNDECIDED, BACK_FORWARD, TAB_SWITCHER, IGNORED }
 +
++    private val density = activity.resources.displayMetrics.density
 +    private val touchSlop = ViewConfiguration.get(activity).scaledTouchSlop
 +    private val minimumFlingVelocity = ViewConfiguration.get(activity).scaledMinimumFlingVelocity
 +    private val windowWidth: Int
 +        get() = activity.resources.displayMetrics.widthPixels
++    private val isLtr: Boolean
++        get() = activity.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_LTR
 +
 +    private var mode = Mode.UNDECIDED
 +    private var dx = 0f
 +    private var dy = 0f
 +    private var startedInSystemGestureInset = false
++    private var arrow: ImageView? = null
 +
 +    override fun onSwipeStarted(start: PointF, next: PointF): Boolean {
 +        if (activity.window.decorView.isKeyboardVisible() || !start.isInBars()) {
@@ -188,89 +484,119 @@ index 0000000000..a3fa03e9c9
 +        dy -= distanceY
 +        classifyWhenReady()
 +
-+        if (mode == Mode.BACK_FORWARD || mode == Mode.SWITCH_TABS) {
-+            // Follow the finger a little so the gesture feels connected, without revealing anything behind the page.
-+            val limit = windowWidth * MAX_DRAG_PERCENT
-+            contentLayout.translationX = (dx * DRAG_RESISTANCE).coerceIn(-limit, limit)
++        when (mode) {
++            Mode.BACK_FORWARD -> updateBackForward()
++            Mode.TAB_SWITCHER -> tabSwitcher?.update(dx, awayFromEdge())
++            else -> Unit
 +        }
 +    }
 +
 +    override fun onSwipeFinished(velocityX: Float, velocityY: Float) {
-+        val fingerMovedLeft = dx < 0
 +        when (mode) {
-+            Mode.BACK_FORWARD ->
-+                if (isCommitted(velocityX)) {
-+                    val isLtr = activity.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_LTR
-+                    goBackOrForward(goBack = fingerMovedLeft != isLtr)
-+                }
-+            Mode.SWITCH_TABS ->
-+                if (hypot(dx, dy) >= windowWidth * COMMIT_PERCENT) {
-+                    adjacentTab(next = fingerMovedLeft)?.let { tab ->
-+                        selectTabUseCase(tab.id)
-+                        onTabSwitched(tab)
-+                    }
-+                }
++            Mode.BACK_FORWARD -> finishBackForward(velocityX)
++            Mode.TAB_SWITCHER -> tabSwitcher?.finish(velocityX)
 +            else -> Unit
 +        }
-+        contentLayout.animate().translationX(0f).setDuration(SETTLE_ANIMATION_DURATION).start()
 +        mode = Mode.UNDECIDED
 +    }
 +
-+    /** Picks the gesture once the finger has moved far enough for its angle to be meaningful. */
 +    private fun classifyWhenReady() {
 +        if (mode != Mode.UNDECIDED || hypot(dx, dy) < touchSlop * DECIDE_DISTANCE_SLOPS) return
 +
-+        // Positive when moving away from the toolbar's edge of the screen.
-+        val awayFromEdge = if (toolbarPosition == ToolbarPosition.BOTTOM) -dy else dy
 +        // 0° is sideways, 90° is straight away from the toolbar, negative is toward the screen edge.
-+        val angle = Math.toDegrees(atan2(awayFromEdge, abs(dx)).toDouble())
-+        val upwardAllowed = !startedInSystemGestureInset
-+
++        val angle = Math.toDegrees(atan2(awayFromEdge(), abs(dx)).toDouble())
 +        mode =
 +            when {
 +                abs(angle) <= SIDEWAYS_MAX_ANGLE -> Mode.BACK_FORWARD
-+                angle >= STRAIGHT_UP_MIN_ANGLE && upwardAllowed && onShowTabs != null -> Mode.SHOW_TABS
-+                angle > SIDEWAYS_MAX_ANGLE &&
-+                    angle < STRAIGHT_UP_MIN_ANGLE &&
-+                    upwardAllowed &&
-+                    canSwitchTabs -> Mode.SWITCH_TABS
++                angle > SIDEWAYS_MAX_ANGLE && tabSwitcher != null && !startedInSystemGestureInset -> Mode.TAB_SWITCHER
 +                else -> Mode.IGNORED
 +            }
 +
-+        when (mode) {
-+            Mode.SHOW_TABS -> onShowTabs?.invoke()
-+            Mode.SWITCH_TABS -> onSwitchTabsStarted()
-+            else -> Unit
++        if (mode == Mode.TAB_SWITCHER) {
++            onSwipeStarted()
++            tabSwitcher?.start()
++            tabSwitcher?.update(dx, awayFromEdge())
 +        }
 +    }
 +
-+    private fun isCommitted(velocityX: Float): Boolean {
++    private fun awayFromEdge() = if (toolbarPosition == ToolbarPosition.BOTTOM) -dy else dy
++
++    private fun isGoingBack() = (dx > 0) == isLtr
++
++    private fun canNavigate(): Boolean {
++        val content = store.state.selectedTab?.content ?: return false
++        return if (isGoingBack()) content.canGoBack else content.canGoForward
++    }
++
++    private fun updateBackForward() {
++        val limit = windowWidth * MAX_DRAG_PERCENT
++        val resistance = if (canNavigate()) DRAG_RESISTANCE else DRAG_RESISTANCE_BLOCKED
++        contentLayout.translationX = (dx * resistance).coerceIn(-limit, limit)
++
++        val progress = (abs(dx) / (windowWidth * COMMIT_PERCENT)).coerceIn(0f, 1f)
++        val view = arrow ?: createArrow().also { arrow = it }
++        val fromLeft = dx > 0
++        val size = ARROW_SIZE_DP * density
++        view.setImageResource(if (isGoingBack()) iconsR.drawable.mozac_ic_back_24 else iconsR.drawable.mozac_ic_forward_24)
++        view.translationX =
++            if (fromLeft) {
++                -size + (size + ARROW_MARGIN_DP * density) * progress
++            } else {
++                overlayContainer.width - (ARROW_MARGIN_DP * density + size) * progress
++            }
++        view.alpha = if (canNavigate()) progress else progress * BLOCKED_ARROW_ALPHA
++        val armed = progress >= 1f && canNavigate()
++        view.scaleX = if (armed) ARMED_SCALE else 1f
++        view.scaleY = view.scaleX
++    }
++
++    private fun finishBackForward(velocityX: Float) {
 +        val flungSameWay = abs(velocityX) >= minimumFlingVelocity && (velocityX < 0) == (dx < 0)
-+        return abs(dx) >= windowWidth * COMMIT_PERCENT || flungSameWay
-+    }
++        val committed = (abs(dx) >= windowWidth * COMMIT_PERCENT || flungSameWay) && canNavigate()
 +
-+    private fun goBackOrForward(goBack: Boolean) {
-+        val tab = store.state.selectedTab ?: return
-+        when {
-+            goBack && tab.content.canGoBack -> sessionUseCases.goBack(tab.id)
-+            !goBack && tab.content.canGoForward -> sessionUseCases.goForward(tab.id)
++        if (committed) {
++            val tab = store.state.selectedTab
++            if (tab != null) {
++                if (isGoingBack()) sessionUseCases.goBack(tab.id) else sessionUseCases.goForward(tab.id)
++            }
++            // The page slides the rest of the way out, then the new one comes in from the other side.
++            val out = if (dx > 0) windowWidth * EXIT_PERCENT else -windowWidth * EXIT_PERCENT
++            contentLayout
++                .animate()
++                .translationX(out)
++                .alpha(EXIT_ALPHA)
++                .setDuration(EXIT_DURATION_MS)
++                .withEndAction {
++                    contentLayout.translationX = -out
++                    contentLayout.animate().translationX(0f).alpha(1f).setDuration(ENTER_DURATION_MS).start()
++                }
++                .start()
++            arrow?.animate()?.scaleX(POP_SCALE)?.scaleY(POP_SCALE)?.alpha(0f)?.setDuration(ENTER_DURATION_MS)?.start()
++        } else {
++            contentLayout.animate().translationX(0f).setDuration(SETTLE_DURATION_MS).start()
++            arrow?.animate()?.alpha(0f)?.setDuration(SETTLE_DURATION_MS)?.start()
 +        }
 +    }
 +
-+    private fun adjacentTab(next: Boolean): TabSessionState? {
-+        val current = store.state.selectedTab ?: return null
-+        val tabs = store.state.getNormalOrPrivateTabs(current.content.private).filter { it.isActive(maxActiveTime) }
-+        val index = tabs.indexOfFirst { it.id == current.id }
-+        if (index == -1) return null
-+        val isLtr = activity.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_LTR
-+        val step = if (next == isLtr) 1 else -1
-+        return tabs.getOrNull(index + step)
++    private fun createArrow(): ImageView {
++        val size = (ARROW_SIZE_DP * density).toInt()
++        val padding = (ARROW_PADDING_DP * density).toInt()
++        return ImageView(activity).apply {
++            background = GradientDrawable().apply {
++                shape = GradientDrawable.OVAL
++                setColor(Color.argb(ARROW_BACKGROUND_ALPHA, 32, 32, 36))
++            }
++            imageTintList = ColorStateList.valueOf(Color.WHITE)
++            setPadding(padding, padding, padding, padding)
++            elevation = ARROW_ELEVATION_DP * density
++            alpha = 0f
++            overlayContainer.addView(this, FrameLayout.LayoutParams(size, size, Gravity.CENTER_VERTICAL or Gravity.START))
++        }
 +    }
 +
 +    private fun PointF.isInBars(): Boolean {
 +        val toolbar = toolbarLayoutRect()?.let { Rect(it) }
-+        // A bottom toolbar overlaps the system's gesture area on newer Android versions, so extend the touch area to
-+        // cover it; only sideways swipes are accepted from there (see isInSystemGestureInset).
++        // A bottom toolbar overlaps the system gesture area, so extend the touch area to cover it.
 +        if (toolbar != null && toolbarPosition == ToolbarPosition.BOTTOM) {
 +            activity.window.decorView.getWindowInsets()?.let { insets ->
 +                toolbar.top -= (insets.mandatorySystemGestureInsets().bottom - insets.bottom())
@@ -295,28 +621,35 @@ index 0000000000..a3fa03e9c9
 +
 +    private companion object {
 +        /** How far (in touch slops) the finger must move before the gesture's direction is decided. */
-+        const val DECIDE_DISTANCE_SLOPS = 3
++        const val DECIDE_DISTANCE_SLOPS = 2
 +
-+        /** Swipes within this many degrees of horizontal are back/forward. */
-+        const val SIDEWAYS_MAX_ANGLE = 25.0
++        /** Swipes within this many degrees of horizontal are back/forward; steeper upward swipes open the switcher. */
++        const val SIDEWAYS_MAX_ANGLE = 30.0
 +
-+        /** Swipes at least this steep are "straight up" (tabs tray); anything in between switches tabs. */
-+        const val STRAIGHT_UP_MIN_ANGLE = 65.0
++        /** Fraction of the screen width a sideways swipe must travel to go back/forward (unless flung). */
++        const val COMMIT_PERCENT = 0.22f
 +
-+        /** Fraction of the screen width a swipe must travel to act (unless it is a fling, for back/forward). */
-+        const val COMMIT_PERCENT = 0.15f
++        const val DRAG_RESISTANCE = 0.45f
++        const val DRAG_RESISTANCE_BLOCKED = 0.12f
++        const val MAX_DRAG_PERCENT = 0.3f
++        const val EXIT_PERCENT = 0.35f
++        const val EXIT_ALPHA = 0.4f
++        const val EXIT_DURATION_MS = 110L
++        const val ENTER_DURATION_MS = 220L
++        const val SETTLE_DURATION_MS = 200L
 +
-+        /** How much of the finger movement the page follows while dragging. */
-+        const val DRAG_RESISTANCE = 0.35f
-+
-+        /** The furthest the page slides while dragging, as a fraction of the screen width. */
-+        const val MAX_DRAG_PERCENT = 0.2f
-+
-+        const val SETTLE_ANIMATION_DURATION = 200L
++        const val ARROW_SIZE_DP = 48f
++        const val ARROW_PADDING_DP = 12f
++        const val ARROW_MARGIN_DP = 12f
++        const val ARROW_ELEVATION_DP = 6f
++        const val ARROW_BACKGROUND_ALPHA = 220
++        const val BLOCKED_ARROW_ALPHA = 0.35f
++        const val ARMED_SCALE = 1.15f
++        const val POP_SCALE = 1.4f
 +    }
 +}
 +
-+/** Opens the tabs tray from the browser or home screen, as the straight-up toolbar swipe does. */
++/** Opens the tabs tray from the browser or home screen. */
 +fun NavController.showTabsTrayFromToolbar(appStore: AppStore) {
 +    val current = currentDestination?.id
 +    // Avoid racing a navigation that is already under way, and leave the search screen alone.
@@ -357,25 +690,35 @@ index 2bc0c03453..b248a69b03 100644
              .initializeSwipeUI()
      }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/ui/HomeSwipeIntegration.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/ui/HomeSwipeIntegration.kt
-index cbf2083329..3b854c5cdb 100644
+index cbf2083329..0194d38bb3 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/ui/HomeSwipeIntegration.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/ui/HomeSwipeIntegration.kt
-@@ -13,11 +13,11 @@ import mozilla.components.concept.engine.utils.ABOUT_HOME_URL
+@@ -7,17 +7,21 @@ package org.mozilla.fenix.home.ui
+ import android.app.Activity
+ import android.graphics.Rect
+ import android.view.View
++import androidx.core.view.drawToBitmap
+ import androidx.navigation.NavController
+ import mozilla.components.browser.state.store.BrowserStore
+ import mozilla.components.concept.engine.utils.ABOUT_HOME_URL
  import mozilla.components.feature.tabs.TabsUseCases
  import org.mozilla.fenix.R
  import org.mozilla.fenix.browser.SwipeGestureLayout
 -import org.mozilla.fenix.browser.TabPreview
 -import org.mozilla.fenix.components.toolbar.gestures.ToolbarHorizontalGesturesHandler
++import org.mozilla.fenix.components.toolbar.ToolbarPosition
++import org.mozilla.fenix.components.toolbar.gestures.FoundryTabSwitcher
 +import org.mozilla.fenix.components.toolbar.gestures.FoundryToolbarGesturesHandler
++import org.mozilla.fenix.components.toolbar.gestures.showTabsTrayFromToolbar
 +import org.mozilla.fenix.ext.components
  
  /**
 - * Adds swipe-to-switch-tabs support from the homepage.
-+ * Adds the Foundry toolbar swipes (back/forward, switch tabs) to the homepage.
++ * Adds the Foundry toolbar swipes (back/forward and the card tab switcher) to the homepage.
   *
   * When "Homepage as a tab" is enabled, Home represents a special tab (`about:home`). Swiping on the Home toolbar should
   * switch to adjacent tabs with a sliding preview, just like the browser does. Because the Home toolbar and navigation
-@@ -35,7 +35,6 @@ import org.mozilla.fenix.components.toolbar.gestures.ToolbarHorizontalGesturesHa
+@@ -35,7 +39,6 @@ import org.mozilla.fenix.components.toolbar.gestures.ToolbarHorizontalGesturesHa
   *   or has not been laid out yet.
   * @param toolbarLayoutRect Supplies the toolbar's current bounds in screen coordinates, or null if it has not been laid
   *   out yet.
@@ -383,7 +726,7 @@ index cbf2083329..3b854c5cdb 100644
   */
  @Suppress("LongParameterList")
  class HomeSwipeIntegration(
-@@ -47,7 +46,6 @@ class HomeSwipeIntegration(
+@@ -47,7 +50,6 @@ class HomeSwipeIntegration(
      private val navController: NavController,
      private val navBarLayoutRect: () -> Rect?,
      private val toolbarLayoutRect: () -> Rect?,
@@ -391,26 +734,48 @@ index cbf2083329..3b854c5cdb 100644
  ) {
  
      /**
-@@ -56,15 +54,17 @@ class HomeSwipeIntegration(
+@@ -55,23 +57,34 @@ class HomeSwipeIntegration(
+      * responsible for gating this on the relevant settings.
       */
      fun initializeSwipeUI() {
-         gestureLayout.addGestureListener(
+-        gestureLayout.addGestureListener(
 -            ToolbarHorizontalGesturesHandler(
-+            FoundryToolbarGesturesHandler(
-                 activity = activity,
-                 contentLayout = contentLayout,
+-                activity = activity,
+-                contentLayout = contentLayout,
 -                tabPreview = tabPreview,
 -                toolbarLayoutRect = { toolbarLayoutRect() ?: Rect() },
 -                navBarLayoutRect = { navBarLayoutRect() },
-+                toolbarLayoutRect = toolbarLayoutRect,
-+                navBarLayoutRect = navBarLayoutRect,
-+                toolbarPosition = activity.components.settings.toolbarPosition,
++        val settings = activity.components.settings
++        val tabSwitcher =
++            FoundryTabSwitcher(
++                container = gestureLayout,
                  store = store,
-+                sessionUseCases = activity.components.useCases.sessionUseCases,
-                 selectTabUseCase = selectTabUseCase,
+-                selectTabUseCase = selectTabUseCase,
 -                onSwipeStarted = {},
-+                onShowTabs = null,
-+                canSwitchTabs = true,
-                 onTabSwitched = { tab ->
+-                onTabSwitched = { tab ->
++                captureCurrent = { onCaptured -> onCaptured(runCatching { contentLayout.drawToBitmap() }.getOrNull()) },
++                onSelectTab = { tab ->
++                    selectTabUseCase(tab.id)
                      if (
                          tab.content.url != ABOUT_HOME_URL && navController.currentDestination?.id == R.id.homeFragment
+                     ) {
+                         navController.navigate(R.id.browserFragment)
+                     }
+                 },
++                onShowTabsTray = { navController.showTabsTrayFromToolbar(activity.components.appStore) },
++                toolbarAtBottom = settings.toolbarPosition == ToolbarPosition.BOTTOM,
++            )
++        gestureLayout.addGestureListener(
++            FoundryToolbarGesturesHandler(
++                activity = activity,
++                contentLayout = contentLayout,
++                overlayContainer = gestureLayout,
++                toolbarLayoutRect = toolbarLayoutRect,
++                navBarLayoutRect = navBarLayoutRect,
++                toolbarPosition = settings.toolbarPosition,
++                store = store,
++                sessionUseCases = activity.components.useCases.sessionUseCases,
++                tabSwitcher = tabSwitcher.takeIf { settings.isSwipeToolbarToShowTabsEnabled },
+             )
+         )
+     }
