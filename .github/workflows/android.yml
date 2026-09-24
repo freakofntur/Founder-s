@@ -1,0 +1,47 @@
+name: Android build
+
+on:
+  push:
+    paths: ['android/**', '.github/workflows/android.yml']
+  pull_request:
+    paths: ['android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Firefox checkout, SDK and Gradle caches need more room than the runner has free by default.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Cache toolchains
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.mozbuild
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: foundry-${{ hashFiles('android/FIREFOX_REVISION') }}
+          restore-keys: foundry-
+
+      - name: Fetch Firefox source
+        run: android/scripts/fetch.sh
+
+      - name: Apply Foundry patches
+        run: android/scripts/apply.sh
+
+      - name: Build
+        run: android/scripts/build.sh
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundry-debug-apk
+          path: android/firefox/objdir-foundry/gradle/build/mobile/android/fenix/app/outputs/apk/**/*.apk
+          if-no-files-found: error

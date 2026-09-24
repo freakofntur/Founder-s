@@ -15,6 +15,6 @@ export MOZBUILD_STATE_PATH="${MOZBUILD_STATE_PATH:-$HOME/.mozbuild}"
 
 # Downloads prebuilt Gecko for this revision, then assembles the app.
 ./mach build
-./mach gradle -p mobile/android/fenix app:assembleFenixDebug
+./mach gradle fenix:assembleDebug
 
 find mobile/android/fenix/app/build/outputs/apk -name '*.apk' -print
