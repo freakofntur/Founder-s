@@ -1,0 +1,201 @@
+diff --git a/mobile/android/fenix/app/src/main/res/values-night-v27/styles.xml b/mobile/android/fenix/app/src/main/res/values-night-v27/styles.xml
+index ce769d9e95..ab9e51b9c8 100644
+--- a/mobile/android/fenix/app/src/main/res/values-night-v27/styles.xml
++++ b/mobile/android/fenix/app/src/main/res/values-night-v27/styles.xml
+@@ -6,7 +6,7 @@
+     <style name="NormalTheme" parent="NormalThemeBase" >
+         <!-- We have to pull in the changes from night/styles.xml to make
+             sure we also get them in night-v27+ -->
+-        <item name="fenixWordmarkText">@drawable/ic_wordmark_text_private</item>
++        <item name="fenixWordmarkText">@drawable/foundry_wordmark_text</item>
+         
+         <item name="android:windowLayoutInDisplayCutoutMode">default</item>
+     </style>
+diff --git a/mobile/android/fenix/app/src/main/res/values-night/styles.xml b/mobile/android/fenix/app/src/main/res/values-night/styles.xml
+index 388295b3d3..c21f18b88b 100644
+--- a/mobile/android/fenix/app/src/main/res/values-night/styles.xml
++++ b/mobile/android/fenix/app/src/main/res/values-night/styles.xml
+@@ -6,7 +6,7 @@
+     <style name="DialogStyleNormal" parent="BaseDialogStyle"/>
+ 
+     <style name="NormalTheme" parent="NormalThemeBase" >
+-        <item name="fenixWordmarkText">@drawable/ic_wordmark_text_private</item>
++        <item name="fenixWordmarkText">@drawable/foundry_wordmark_text</item>
+     </style>
+     <style name="BottomSheet" parent="BottomSheetBase">
+         <item name="android:windowLightStatusBar">false</item>
+diff --git a/mobile/android/fenix/app/src/main/res/values/strings.xml b/mobile/android/fenix/app/src/main/res/values/strings.xml
+index 912da646cd..1dfcfce906 100644
+--- a/mobile/android/fenix/app/src/main/res/values/strings.xml
++++ b/mobile/android/fenix/app/src/main/res/values/strings.xml
+@@ -397,7 +397,7 @@
+     <string name="onboarding_home_content_description_close_button">Close</string>
+ 
+     <!-- Title for the privacy preferences dialog shown during onboarding. Note: The word "Firefox" should NOT be translated. -->
+-    <string name="onboarding_preferences_dialog_title" tools:ignore="BrandUsage">Help us make Firefox better</string>
++    <string name="onboarding_preferences_dialog_title" tools:ignore="BrandUsage">Help us make Foundry better</string>
+     <!-- Title for the crash reporting option in the privacy preferences dialog shown during onboarding. -->
+     <string name="onboarding_preferences_dialog_crash_reporting_title">Automatically send crash reports</string>
+     <!-- Description for the crash reporting option in the privacy preferences dialog shown during onboarding. -->
+@@ -422,7 +422,7 @@
+     <string name="onboarding_preferences_dialog_positive_button">Done</string>
+ 
+     <!-- Terms of service onboarding title card label. 'Firefox' intentionally hardcoded here-->
+-    <string name="onboarding_welcome_to_firefox" tools:ignore="BrandUsage">Welcome to Firefox</string>
++    <string name="onboarding_welcome_to_firefox" tools:ignore="BrandUsage">Welcome to Foundry</string>
+     <!-- Line one of the terms of service onboarding page. %1$s is replaced by an active link, using onboarding_term_of_service_line_one_link_text_2 as text (“Firefox Terms of Use”). -->
+     <string name="onboarding_term_of_service_line_one_2">By continuing, you agree to the %1$s.</string>
+     <!-- Used as text for the link in onboarding_term_of_service_line_one_2. -->
+@@ -631,10 +631,10 @@
+     <string name="nova_onboarding_marketing_secondary_button_text_2">No</string>
+ 
+     <!-- Notifications onboarding title. 'Firefox' is intentionally hardcoded. -->
+-    <string name="nova_onboarding_notifications_title" tools:ignore="BrandUsage,UnusedResources">Notifications help you stay safer with Firefox</string>
++    <string name="nova_onboarding_notifications_title" tools:ignore="BrandUsage,UnusedResources">Notifications help you stay safer with Foundry</string>
+ 
+     <!-- Notifications onboarding subtitle. 'Firefox' is intentionally hardcoded. -->
+-    <string name="nova_onboarding_notifications_subtitle" tools:ignore="BrandUsage,UnusedResources">Discover the latest privacy features in Firefox so you’re always up to date on how to stay protected.</string>
++    <string name="nova_onboarding_notifications_subtitle" tools:ignore="BrandUsage,UnusedResources">Discover the latest privacy features in Foundry so you’re always up to date on how to stay protected.</string>
+ 
+     <!-- Notifications onboarding button. -->
+     <string name="nova_onboarding_notifications_button">Turn on notifications</string>
+@@ -643,10 +643,10 @@
+     <string name="nova_onboarding_add_search_widget_title">Make every search more private</string>
+ 
+     <!-- "Add search widget" onboarding subtitle. 'Firefox' is intentionally hardcoded. -->
+-    <string name="nova_onboarding_add_search_widget_subtitle" tools:ignore="BrandUsage">Start every search from your phone’s home screen and know Firefox’s automatic protections have your back.</string>
++    <string name="nova_onboarding_add_search_widget_subtitle" tools:ignore="BrandUsage">Start every search from your phone’s home screen and know Foundry’s automatic protections have your back.</string>
+ 
+     <!-- "Add search widget" onboarding button. 'Firefox' is intentionally hardcoded. -->
+-    <string name="nova_onboarding_add_search_widget_button" tools:ignore="BrandUsage">Add Firefox widget</string>
++    <string name="nova_onboarding_add_search_widget_button" tools:ignore="BrandUsage">Add Foundry widget</string>
+ 
+     <!-- Customize prompt onboarding title. -->
+     <string name="nova_onboarding_customize_prompt_title" tools:ignore="UnusedResources">Easy to customize and more private with every tap</string>
+@@ -1065,7 +1065,7 @@
+     <!-- Title of the Nimbus message for extension general availability-->
+     <string name="addon_ga_message_title_2" tools:ignore="UnusedResources">New extensions now available</string>
+     <!-- Body of the Nimbus message for add-ons general availability. 'Firefox' intentionally hardcoded here-->
+-    <string name="addon_ga_message_body" tools:ignore="BrandUsage,UnusedResources">Check out 100+ new extensions that let you make Firefox your own.</string>
++    <string name="addon_ga_message_body" tools:ignore="BrandUsage,UnusedResources">Check out 100+ new extensions that let you make Foundry your own.</string>
+     <!-- Button text of the Nimbus message for extensions general availability. -->
+     <string name="addon_ga_message_button_2" tools:ignore="UnusedResources">Explore extensions</string>
+ 
+@@ -2262,10 +2262,10 @@
+     <string name="notification_marketing_channel_name">Marketing</string>
+     <!-- Title shown in the notification that pops up to remind the user to set fenix as default browser.
+     The app name is in the text, due to limitations with localizing Nimbus experiments -->
+-    <string name="nimbus_notification_default_browser_title" tools:ignore="BrandUsage,UnusedResources">Firefox is fast and private</string>
++    <string name="nimbus_notification_default_browser_title" tools:ignore="BrandUsage,UnusedResources">Foundry is fast and private</string>
+     <!-- Text shown in the notification that pops up to remind the user to set fenix as default browser.
+     The app name is in the text, due to limitations with localizing Nimbus experiments -->
+-    <string name="nimbus_notification_default_browser_text" tools:ignore="BrandUsage,UnusedResources">Make Firefox your default browser</string>
++    <string name="nimbus_notification_default_browser_text" tools:ignore="BrandUsage,UnusedResources">Make Foundry your default browser</string>
+ 
+     <!-- Privacy report notification -->
+     <!-- Name of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app. -->
+@@ -3279,7 +3279,7 @@
+     <!-- The header text of the auto-close message when the user is asked if they want to turn on the auto-closing of inactive tabs. -->
+     <string name="inactive_tabs_auto_close_message_header" tools:ignore="UnusedResources">Auto-close after one month?</string>
+     <!-- A description below the header to notify the user what the inactive tabs auto-close feature is. -->
+-    <string name="inactive_tabs_auto_close_message_description" tools:ignore="BrandUsage,UnusedResources">Firefox can close tabs you haven’t viewed over the past month.</string>
++    <string name="inactive_tabs_auto_close_message_description" tools:ignore="BrandUsage,UnusedResources">Foundry can close tabs you haven’t viewed over the past month.</string>
+     <!-- A call to action below the description to allow the user to turn on the auto closing of inactive tabs. -->
+     <string name="inactive_tabs_auto_close_message_action" tools:ignore="UnusedResources">TURN ON AUTO CLOSE</string>
+     <!-- Text for the snackbar to confirm auto-close is enabled for inactive tabs -->
+@@ -3302,7 +3302,7 @@
+     <!-- Default browser card title -->
+     <string name="default_browser_experiment_card_title">Switch your default browser</string>
+     <!-- Default browser card text -->
+-    <string name="default_browser_experiment_card_text" tools:ignore="BrandUsage">Set links from websites, emails, and messages to open automatically in Firefox.</string>
++    <string name="default_browser_experiment_card_text" tools:ignore="BrandUsage">Set links from websites, emails, and messages to open automatically in Foundry.</string>
+ 
+     <!-- Content description radio buttons with a link to more information -->
+     <string name="radio_preference_info_content_description">Click for more details</string>
+@@ -3732,7 +3732,7 @@
+     <!-- Option for likert scale -->
+     <string name="likert_scale_option_6" tools:ignore="UnusedResources">I don’t use it</string>
+     <!-- Option for likert scale. Note: The word "Firefox" should NOT be translated. -->
+-    <string name="likert_scale_option_7" tools:ignore="BrandUsage,UnusedResources">I don’t use search on Firefox</string>
++    <string name="likert_scale_option_7" tools:ignore="BrandUsage,UnusedResources">I don’t use search on Foundry</string>
+     <!-- Option for likert scale -->
+     <string name="likert_scale_option_8" tools:ignore="UnusedResources">I don’t use sync</string>
+     <!-- Option for likert scale -->
+@@ -3744,7 +3744,7 @@
+     <!-- Option for likert scale -->
+     <string name="likert_scale_option_its_okay" tools:ignore="UnusedResources">It’s okay, but not better than other browsers</string>
+     <!-- Option for likert scale. Note: The word "Firefox" should NOT be translated. -->
+-    <string name="likert_scale_option_i_plan_to_keep_using" tools:ignore="BrandUsage,UnusedResources">I plan to keep using Firefox</string>
++    <string name="likert_scale_option_i_plan_to_keep_using" tools:ignore="BrandUsage,UnusedResources">I plan to keep using Foundry</string>
+     <!-- Text shown in prompt for printing microsurvey. "sec" It's an abbreviation for "second". Note: The word "Firefox" should NOT be translated. -->
+     <string name="microsurvey_prompt_printing_title" tools:ignore="BrandUsage,UnusedResources">Help make printing in Firefox better. It only takes a sec</string>
+     <!-- Text shown in prompt for search microsurvey. Note: The word "Firefox" should NOT be translated. -->
+@@ -3873,27 +3873,27 @@
+     <!-- Homepage card button to open Google Play Store. "Update" is a verb. -->
+     <string name="certificate_warning_homepage_card_update_now_button" tools:ignore="UnusedResources">Update now</string>
+     <!-- Homepage card title about old Firefox version. "Update" is a verb. Note: The word "Firefox" should NOT be translated. -->
+-    <string name="certificate_warning_homepage_card_hca1_title" tools:ignore="BrandUsage,UnusedResources">Update your Firefox browser</string>
++    <string name="certificate_warning_homepage_card_hca1_title" tools:ignore="BrandUsage,UnusedResources">Update your Foundry browser</string>
+     <!-- Homepage card message about old Firefox version -->
+     <string name="certificate_warning_homepage_card_hca1_message" tools:ignore="UnusedResources">A root certificate will expire, causing some features to stop working on March 14.</string>
+     <!-- Homepage card title about old Firefox version. "Update" is a verb. -->
+     <string name="certificate_warning_homepage_card_hcr1_title" tools:ignore="UnusedResources">Update before March 14</string>
+     <!-- Homepage card message about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+-    <string name="certificate_warning_homepage_card_hcr1_message" tools:ignore="BrandUsage,UnusedResources">A root certificate will expire, causing your version of Firefox to stop working properly.</string>
++    <string name="certificate_warning_homepage_card_hcr1_message" tools:ignore="BrandUsage,UnusedResources">A root certificate will expire, causing your version of Foundry to stop working properly.</string>
+     <!-- Homepage card title about old Firefox version -->
+     <string name="certificate_warning_homepage_card_hcw2_title" tools:ignore="UnusedResources">Less than 7 days to left to update</string>
+     <!-- Homepage card message about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+-    <string name="certificate_warning_homepage_card_hcw2_message" tools:ignore="BrandUsage,UnusedResources">On March 14, add-ons and other Firefox features will stop working because a root certificate is expiring.</string>
++    <string name="certificate_warning_homepage_card_hcw2_message" tools:ignore="BrandUsage,UnusedResources">On March 14, add-ons and other Foundry features will stop working because a root certificate is expiring.</string>
+     <!-- Homepage card title about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+-    <string name="certificate_warning_homepage_card_hcw3_title" tools:ignore="BrandUsage,UnusedResources">Last chance to keep your Firefox</string>
++    <string name="certificate_warning_homepage_card_hcw3_title" tools:ignore="BrandUsage,UnusedResources">Last chance to keep your Foundry</string>
+     <!-- Homepage card message about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+-    <string name="certificate_warning_homepage_card_hcw3_message" tools:ignore="BrandUsage,UnusedResources">Your version of Firefox will stop working properly on March 14 because a root certificate is expiring.</string>
++    <string name="certificate_warning_homepage_card_hcw3_message" tools:ignore="BrandUsage,UnusedResources">Your version of Foundry will stop working properly on March 14 because a root certificate is expiring.</string>
+     <!-- Push notification title about old Firefox version. "Update" is a noun. -->
+     <string name="certificate_warning_push_notification_update_recommended_title" tools:ignore="UnusedResources">Update recommended</string>
+     <!-- Push notification message about old Firefox version -->
+     <string name="certificate_warning_push_notification_pnr1_message" tools:ignore="UnusedResources">Add-ons and some features will stop working on March 14.</string>
+     <!-- Push notification title about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+-    <string name="certificate_warning_push_notification_pnw2_title" tools:ignore="BrandUsage,UnusedResources">You’re on an older version of Firefox</string>
++    <string name="certificate_warning_push_notification_pnw2_title" tools:ignore="BrandUsage,UnusedResources">You’re on an older version of Foundry</string>
+     <!-- Push notification message about old Firefox version. "Update" is a verb. -->
+     <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">Update before March 14 to keep using add-ons and other features.</string>
+     <!-- Push notification message about old Firefox version -->
+@@ -4148,7 +4148,7 @@
+     experimental and in-development features, and turn those features on and off.
+     The "Labs" portion can be localized, "Firefox" must be treated as a brand and kept
+     in English. -->
+-    <string name="firefox_labs_title" tools:ignore="BrandUsage">Firefox Labs</string>
++    <string name="firefox_labs_title" tools:ignore="BrandUsage">Foundry Labs</string>
+     <!-- Banner title text on the Firefox Labs screen. -->
+     <string name="firefox_labs_banner_title_2">Try our experimental features!</string>
+     <!-- Banner description text on the Firefox Labs screen. Provides information on what Firefox Labs does. %s is the name of the app (for example "Firefox Nightly").
+diff --git a/mobile/android/fenix/app/src/main/res/values/styles.xml b/mobile/android/fenix/app/src/main/res/values/styles.xml
+index f37aeba333..2bed835ac0 100644
+--- a/mobile/android/fenix/app/src/main/res/values/styles.xml
++++ b/mobile/android/fenix/app/src/main/res/values/styles.xml
+@@ -164,8 +164,8 @@
+ 
+         <!-- Drawables -->
+         <item name="fenixLogo">@drawable/ic_logo_wordmark_normal</item>
+-        <item name="fenixWordmarkText">@drawable/ic_wordmark_text_normal</item>
+-        <item name="fenixWordmarkLogo">@drawable/ic_wordmark_logo</item>
++        <item name="fenixWordmarkText">@drawable/foundry_wordmark_text</item>
++        <item name="fenixWordmarkLogo">@drawable/foundry_logo</item>
+         <item name="bottomBarBackground">@drawable/home_bottom_bar_background</item>
+         <item name="bottomBarBackgroundTop">@drawable/home_bottom_bar_background_top</item>
+         <item name="mozac_ic_private_mode_circle_fill_background_color">@android:color/transparent</item>
+@@ -458,8 +458,8 @@
+ 
+         <!-- Drawables -->
+         <item name="fenixLogo">@drawable/ic_logo_wordmark_private</item>
+-        <item name="fenixWordmarkText">@drawable/ic_wordmark_text_private</item>
+-        <item name="fenixWordmarkLogo">@drawable/ic_wordmark_logo</item>
++        <item name="fenixWordmarkText">@drawable/foundry_wordmark_text</item>
++        <item name="fenixWordmarkLogo">@drawable/foundry_logo</item>
+         <item name="bottomBarBackground">@drawable/private_home_bottom_bar_background_gradient</item>
+         <item name="bottomBarBackgroundTop">@drawable/private_home_bottom_bar_background_gradient_top</item>
+         <item name="mozac_ic_private_mode_circle_fill_background_color">@color/novaWhite</item>

@@ -1,0 +1,416 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BrowserFragment.kt
+index 2d733a28d4..840fec78d2 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BrowserFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BrowserFragment.kt
+@@ -61,8 +61,8 @@ import org.mozilla.fenix.components.appstate.AppAction.SnackbarAction
+ import org.mozilla.fenix.components.metrics.installSourcePackage
+ import org.mozilla.fenix.components.share.isSystemShareSheetSupported
+ import org.mozilla.fenix.components.toolbar.ToolbarPosition
+-import org.mozilla.fenix.components.toolbar.gestures.ToolbarHorizontalGesturesHandler
+-import org.mozilla.fenix.components.toolbar.gestures.ToolbarVerticalGesturesHandler
++import org.mozilla.fenix.components.toolbar.gestures.FoundryToolbarGesturesHandler
++import org.mozilla.fenix.components.toolbar.gestures.showTabsTrayFromToolbar
+ import org.mozilla.fenix.compose.snackbar.Snackbar
+ import org.mozilla.fenix.compose.snackbar.SnackbarState
+ import org.mozilla.fenix.e2e.SystemInsetsPaddedFragment
+@@ -209,38 +209,35 @@ class BrowserFragment : BaseBrowserFragment(), UserInteractionHandler, SystemIns
+     }
+ 
+     private fun setupToolbarSwipeBehavior(settings: Settings, components: Components) {
+-        if (!settings.isTabStripEnabled && settings.isSwipeToolbarToSwitchTabsEnabled) {
+-            binding.gestureLayout.addGestureListener(
+-                ToolbarHorizontalGesturesHandler(
+-                    activity = requireActivity(),
+-                    contentLayout = binding.browserLayout,
+-                    tabPreview = binding.tabPreview,
+-                    toolbarLayoutRect = { browserToolbar.layout.getRectWithScreenLocation() },
+-                    navBarLayoutRect = { browserNavigationBar?.layout?.getRectWithScreenLocation() },
+-                    store = components.core.store,
+-                    selectTabUseCase = components.useCases.tabsUseCases.selectTab,
+-                    onSwipeStarted = {
+-                        thumbnailsFeature
+-                            .get()
+-                            ?.requestScreenshot(
+-                                trigger = BrowserThumbnailsFacts.CaptureAttemptedTriggers.SWIPE_TO_SWITCH_TABS
+-                            )
++        // Foundry: one handler for all address bar swipes. Sideways goes back/forward, straight up opens the tabs
++        // tray and diagonally up switches tabs.
++        val navController = findNavController()
++        binding.gestureLayout.addGestureListener(
++            FoundryToolbarGesturesHandler(
++                activity = requireActivity(),
++                contentLayout = binding.browserLayout,
++                toolbarLayoutRect = { browserToolbar.layout.getRectWithScreenLocation() },
++                navBarLayoutRect = { browserNavigationBar?.layout?.getRectWithScreenLocation() },
++                toolbarPosition = settings.toolbarPosition,
++                store = components.core.store,
++                sessionUseCases = components.useCases.sessionUseCases,
++                selectTabUseCase = components.useCases.tabsUseCases.selectTab,
++                onShowTabs =
++                    if (settings.isSwipeToolbarToShowTabsEnabled) {
++                        { navController.showTabsTrayFromToolbar(components.appStore) }
++                    } else {
++                        null
+                     },
+-                )
+-            )
+-        }
+-
+-        if (settings.isSwipeToolbarToShowTabsEnabled) {
+-            binding.gestureLayout.addGestureListener(
+-                ToolbarVerticalGesturesHandler(
+-                    appStore = components.appStore,
+-                    toolbarLayout = browserToolbar.layout,
+-                    navBarLayout = browserNavigationBar?.layout,
+-                    toolbarPosition = settings.toolbarPosition,
+-                    navController = findNavController(),
+-                )
++                canSwitchTabs = !settings.isTabStripEnabled && settings.isSwipeToolbarToSwitchTabsEnabled,
++                onSwitchTabsStarted = {
++                    thumbnailsFeature
++                        .get()
++                        ?.requestScreenshot(
++                            trigger = BrowserThumbnailsFacts.CaptureAttemptedTriggers.SWIPE_TO_SWITCH_TABS
++                        )
++                },
+             )
+-        }
++        )
+     }
+ 
+     @OptIn(ExperimentalCoroutinesApi::class)
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt
+new file mode 100644
+index 0000000000..a3fa03e9c9
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt
+@@ -0,0 +1,250 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.components.toolbar.gestures
++
++import android.app.Activity
++import android.graphics.PointF
++import android.graphics.Rect
++import android.view.View
++import android.view.ViewConfiguration
++import androidx.core.graphics.contains
++import androidx.core.graphics.toPoint
++import androidx.core.view.ViewCompat
++import androidx.core.view.WindowInsetsCompat
++import androidx.navigation.NavController
++import kotlin.math.abs
++import kotlin.math.atan2
++import kotlin.math.hypot
++import mozilla.components.browser.state.selector.getNormalOrPrivateTabs
++import mozilla.components.browser.state.selector.selectedTab
++import mozilla.components.browser.state.state.TabSessionState
++import mozilla.components.browser.state.state.isActive
++import mozilla.components.browser.state.store.BrowserStore
++import mozilla.components.feature.session.SessionUseCases
++import mozilla.components.feature.tabs.TabsUseCases
++import mozilla.components.support.utils.ext.bottom
++import mozilla.components.support.utils.ext.getWindowInsets
++import mozilla.components.support.utils.ext.isKeyboardVisible
++import mozilla.components.support.utils.ext.mandatorySystemGestureInsets
++import mozilla.telemetry.glean.private.NoExtras
++import org.mozilla.fenix.GleanMetrics.Events
++import org.mozilla.fenix.NavGraphDirections
++import org.mozilla.fenix.R
++import org.mozilla.fenix.browser.SwipeGestureListener
++import org.mozilla.fenix.browser.browsingmode.BrowsingMode
++import org.mozilla.fenix.components.AppStore
++import org.mozilla.fenix.components.toolbar.ToolbarPosition
++import org.mozilla.fenix.ext.maxActiveTime
++import org.mozilla.fenix.ext.nav
++import org.mozilla.fenix.tabstray.redux.state.Page
++
++/**
++ * Foundry's address bar gestures. One handler owns every swipe that starts on the toolbar (or navigation bar) and
++ * decides what it means once the finger has moved far enough to read a direction:
++ *
++ * - **Sideways**: back (finger moves right) or forward (finger moves left); mirrored for right-to-left layouts.
++ * - **Straight up**: open the tabs tray.
++ * - **Diagonally up**: switch tabs. Up-left goes to the next tab and up-right to the previous one, the same sense as
++ *   Firefox's sideways tab swipe (the page slides the way the finger moves).
++ *
++ * "Up" means away from the toolbar's screen edge, so with a top toolbar it is a downward swipe.
++ *
++ * @param onShowTabs Opens the tabs tray, or null to disable the straight-up gesture.
++ * @param canSwitchTabs Whether the diagonal tab-switch gesture is enabled.
++ * @param onSwitchTabsStarted Called when a diagonal swipe begins, e.g. to capture a thumbnail for the tabs tray.
++ * @param onTabSwitched Called after a diagonal swipe selected another tab.
++ */
++@Suppress("LongParameterList")
++class FoundryToolbarGesturesHandler(
++    private val activity: Activity,
++    private val contentLayout: View,
++    private val toolbarLayoutRect: () -> Rect?,
++    private val navBarLayoutRect: () -> Rect?,
++    private val toolbarPosition: ToolbarPosition,
++    private val store: BrowserStore,
++    private val sessionUseCases: SessionUseCases,
++    private val selectTabUseCase: TabsUseCases.SelectTabUseCase,
++    private val onShowTabs: (() -> Unit)?,
++    private val canSwitchTabs: Boolean,
++    private val onSwitchTabsStarted: () -> Unit = {},
++    private val onTabSwitched: (TabSessionState) -> Unit = {},
++) : SwipeGestureListener {
++
++    private enum class Mode { UNDECIDED, BACK_FORWARD, SHOW_TABS, SWITCH_TABS, IGNORED }
++
++    private val touchSlop = ViewConfiguration.get(activity).scaledTouchSlop
++    private val minimumFlingVelocity = ViewConfiguration.get(activity).scaledMinimumFlingVelocity
++    private val windowWidth: Int
++        get() = activity.resources.displayMetrics.widthPixels
++
++    private var mode = Mode.UNDECIDED
++    private var dx = 0f
++    private var dy = 0f
++    private var startedInSystemGestureInset = false
++
++    override fun onSwipeStarted(start: PointF, next: PointF): Boolean {
++        if (activity.window.decorView.isKeyboardVisible() || !start.isInBars()) {
++            return false
++        }
++        mode = Mode.UNDECIDED
++        dx = next.x - start.x
++        dy = next.y - start.y
++        startedInSystemGestureInset = start.isInSystemGestureInset()
++        classifyWhenReady()
++        return true
++    }
++
++    override fun onSwipeUpdate(distanceX: Float, distanceY: Float) {
++        dx -= distanceX
++        dy -= distanceY
++        classifyWhenReady()
++
++        if (mode == Mode.BACK_FORWARD || mode == Mode.SWITCH_TABS) {
++            // Follow the finger a little so the gesture feels connected, without revealing anything behind the page.
++            val limit = windowWidth * MAX_DRAG_PERCENT
++            contentLayout.translationX = (dx * DRAG_RESISTANCE).coerceIn(-limit, limit)
++        }
++    }
++
++    override fun onSwipeFinished(velocityX: Float, velocityY: Float) {
++        val fingerMovedLeft = dx < 0
++        when (mode) {
++            Mode.BACK_FORWARD ->
++                if (isCommitted(velocityX)) {
++                    val isLtr = activity.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_LTR
++                    goBackOrForward(goBack = fingerMovedLeft != isLtr)
++                }
++            Mode.SWITCH_TABS ->
++                if (hypot(dx, dy) >= windowWidth * COMMIT_PERCENT) {
++                    adjacentTab(next = fingerMovedLeft)?.let { tab ->
++                        selectTabUseCase(tab.id)
++                        onTabSwitched(tab)
++                    }
++                }
++            else -> Unit
++        }
++        contentLayout.animate().translationX(0f).setDuration(SETTLE_ANIMATION_DURATION).start()
++        mode = Mode.UNDECIDED
++    }
++
++    /** Picks the gesture once the finger has moved far enough for its angle to be meaningful. */
++    private fun classifyWhenReady() {
++        if (mode != Mode.UNDECIDED || hypot(dx, dy) < touchSlop * DECIDE_DISTANCE_SLOPS) return
++
++        // Positive when moving away from the toolbar's edge of the screen.
++        val awayFromEdge = if (toolbarPosition == ToolbarPosition.BOTTOM) -dy else dy
++        // 0° is sideways, 90° is straight away from the toolbar, negative is toward the screen edge.
++        val angle = Math.toDegrees(atan2(awayFromEdge, abs(dx)).toDouble())
++        val upwardAllowed = !startedInSystemGestureInset
++
++        mode =
++            when {
++                abs(angle) <= SIDEWAYS_MAX_ANGLE -> Mode.BACK_FORWARD
++                angle >= STRAIGHT_UP_MIN_ANGLE && upwardAllowed && onShowTabs != null -> Mode.SHOW_TABS
++                angle > SIDEWAYS_MAX_ANGLE &&
++                    angle < STRAIGHT_UP_MIN_ANGLE &&
++                    upwardAllowed &&
++                    canSwitchTabs -> Mode.SWITCH_TABS
++                else -> Mode.IGNORED
++            }
++
++        when (mode) {
++            Mode.SHOW_TABS -> onShowTabs?.invoke()
++            Mode.SWITCH_TABS -> onSwitchTabsStarted()
++            else -> Unit
++        }
++    }
++
++    private fun isCommitted(velocityX: Float): Boolean {
++        val flungSameWay = abs(velocityX) >= minimumFlingVelocity && (velocityX < 0) == (dx < 0)
++        return abs(dx) >= windowWidth * COMMIT_PERCENT || flungSameWay
++    }
++
++    private fun goBackOrForward(goBack: Boolean) {
++        val tab = store.state.selectedTab ?: return
++        when {
++            goBack && tab.content.canGoBack -> sessionUseCases.goBack(tab.id)
++            !goBack && tab.content.canGoForward -> sessionUseCases.goForward(tab.id)
++        }
++    }
++
++    private fun adjacentTab(next: Boolean): TabSessionState? {
++        val current = store.state.selectedTab ?: return null
++        val tabs = store.state.getNormalOrPrivateTabs(current.content.private).filter { it.isActive(maxActiveTime) }
++        val index = tabs.indexOfFirst { it.id == current.id }
++        if (index == -1) return null
++        val isLtr = activity.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_LTR
++        val step = if (next == isLtr) 1 else -1
++        return tabs.getOrNull(index + step)
++    }
++
++    private fun PointF.isInBars(): Boolean {
++        val toolbar = toolbarLayoutRect()?.let { Rect(it) }
++        // A bottom toolbar overlaps the system's gesture area on newer Android versions, so extend the touch area to
++        // cover it; only sideways swipes are accepted from there (see isInSystemGestureInset).
++        if (toolbar != null && toolbarPosition == ToolbarPosition.BOTTOM) {
++            activity.window.decorView.getWindowInsets()?.let { insets ->
++                toolbar.top -= (insets.mandatorySystemGestureInsets().bottom - insets.bottom())
++            }
++        }
++        val point = toPoint()
++        return toolbar?.contains(point) == true || navBarLayoutRect()?.contains(point) == true
++    }
++
++    /**
++     * Whether the swipe started inside the bottom system gesture area, where swiping up means "go home" to Android.
++     * Upward gestures from there are left to the system.
++     */
++    private fun PointF.isInSystemGestureInset(): Boolean {
++        val root = activity.window.decorView
++        val bottomInset =
++            ViewCompat.getRootWindowInsets(root)?.getInsets(WindowInsetsCompat.Type.systemGestures())?.bottom ?: 0
++        if (bottomInset <= 0) return false
++        val screenBottom = IntArray(2).apply { root.getLocationOnScreen(this) }[1] + root.height
++        return y >= screenBottom - bottomInset
++    }
++
++    private companion object {
++        /** How far (in touch slops) the finger must move before the gesture's direction is decided. */
++        const val DECIDE_DISTANCE_SLOPS = 3
++
++        /** Swipes within this many degrees of horizontal are back/forward. */
++        const val SIDEWAYS_MAX_ANGLE = 25.0
++
++        /** Swipes at least this steep are "straight up" (tabs tray); anything in between switches tabs. */
++        const val STRAIGHT_UP_MIN_ANGLE = 65.0
++
++        /** Fraction of the screen width a swipe must travel to act (unless it is a fling, for back/forward). */
++        const val COMMIT_PERCENT = 0.15f
++
++        /** How much of the finger movement the page follows while dragging. */
++        const val DRAG_RESISTANCE = 0.35f
++
++        /** The furthest the page slides while dragging, as a fraction of the screen width. */
++        const val MAX_DRAG_PERCENT = 0.2f
++
++        const val SETTLE_ANIMATION_DURATION = 200L
++    }
++}
++
++/** Opens the tabs tray from the browser or home screen, as the straight-up toolbar swipe does. */
++fun NavController.showTabsTrayFromToolbar(appStore: AppStore) {
++    val current = currentDestination?.id
++    // Avoid racing a navigation that is already under way, and leave the search screen alone.
++    if (current != R.id.browserFragment && current != R.id.homeFragment) return
++    if (appStore.state.searchState.isSearchActive) return
++
++    Events.toolbarTabstraySwipe.record(NoExtras())
++    nav(
++        current,
++        NavGraphDirections.actionGlobalTabManagementFragment(
++            page =
++                when (appStore.state.mode) {
++                    BrowsingMode.Normal -> Page.NormalTabs
++                    BrowsingMode.Private -> Page.PrivateTabs
++                }
++        ),
++    )
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
+index 2bc0c03453..b248a69b03 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
+@@ -620,7 +620,7 @@ class HomeFragment : Fragment(), UserInteractionHandler, OnLongPressedListener {
+ 
+         val gestureLayout = view as? SwipeGestureLayout ?: return
+         val contentLayout = homepageComposeView ?: return
+-        val tabPreview = homeTabPreview ?: return
++        homeTabPreview ?: return
+ 
+         HomeSwipeIntegration(
+                 activity = requireActivity(),
+@@ -631,7 +631,6 @@ class HomeFragment : Fragment(), UserInteractionHandler, OnLongPressedListener {
+                 navController = findNavController(),
+                 navBarLayoutRect = { navbarBoundsInRoot.toScreenRect(contentLayout) },
+                 toolbarLayoutRect = { toolbarBoundsInRoot.toScreenRect(contentLayout) },
+-                tabPreview = tabPreview,
+             )
+             .initializeSwipeUI()
+     }
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/ui/HomeSwipeIntegration.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/ui/HomeSwipeIntegration.kt
+index cbf2083329..3b854c5cdb 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/ui/HomeSwipeIntegration.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/ui/HomeSwipeIntegration.kt
+@@ -13,11 +13,11 @@ import mozilla.components.concept.engine.utils.ABOUT_HOME_URL
+ import mozilla.components.feature.tabs.TabsUseCases
+ import org.mozilla.fenix.R
+ import org.mozilla.fenix.browser.SwipeGestureLayout
+-import org.mozilla.fenix.browser.TabPreview
+-import org.mozilla.fenix.components.toolbar.gestures.ToolbarHorizontalGesturesHandler
++import org.mozilla.fenix.components.toolbar.gestures.FoundryToolbarGesturesHandler
++import org.mozilla.fenix.ext.components
+ 
+ /**
+- * Adds swipe-to-switch-tabs support from the homepage.
++ * Adds the Foundry toolbar swipes (back/forward, switch tabs) to the homepage.
+  *
+  * When "Homepage as a tab" is enabled, Home represents a special tab (`about:home`). Swiping on the Home toolbar should
+  * switch to adjacent tabs with a sliding preview, just like the browser does. Because the Home toolbar and navigation
+@@ -35,7 +35,6 @@ import org.mozilla.fenix.components.toolbar.gestures.ToolbarHorizontalGesturesHa
+  *   or has not been laid out yet.
+  * @param toolbarLayoutRect Supplies the toolbar's current bounds in screen coordinates, or null if it has not been laid
+  *   out yet.
+- * @param tabPreview The [TabPreview] used to display the adjacent tab while swiping.
+  */
+ @Suppress("LongParameterList")
+ class HomeSwipeIntegration(
+@@ -47,7 +46,6 @@ class HomeSwipeIntegration(
+     private val navController: NavController,
+     private val navBarLayoutRect: () -> Rect?,
+     private val toolbarLayoutRect: () -> Rect?,
+-    private val tabPreview: TabPreview,
+ ) {
+ 
+     /**
+@@ -56,15 +54,17 @@ class HomeSwipeIntegration(
+      */
+     fun initializeSwipeUI() {
+         gestureLayout.addGestureListener(
+-            ToolbarHorizontalGesturesHandler(
++            FoundryToolbarGesturesHandler(
+                 activity = activity,
+                 contentLayout = contentLayout,
+-                tabPreview = tabPreview,
+-                toolbarLayoutRect = { toolbarLayoutRect() ?: Rect() },
+-                navBarLayoutRect = { navBarLayoutRect() },
++                toolbarLayoutRect = toolbarLayoutRect,
++                navBarLayoutRect = navBarLayoutRect,
++                toolbarPosition = activity.components.settings.toolbarPosition,
+                 store = store,
++                sessionUseCases = activity.components.useCases.sessionUseCases,
+                 selectTabUseCase = selectTabUseCase,
+-                onSwipeStarted = {},
++                onShowTabs = null,
++                canSwitchTabs = true,
+                 onTabSwitched = { tab ->
+                     if (
+                         tab.content.url != ABOUT_HOME_URL && navController.currentDestination?.id == R.id.homeFragment

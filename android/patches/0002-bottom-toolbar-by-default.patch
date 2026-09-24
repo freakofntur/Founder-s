@@ -1,0 +1,13 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
+index dd8dd9a663..665c9c9a2f 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
+@@ -1620,7 +1620,7 @@ class Settings(
+     var shouldUseBottomToolbar by
+         booleanPreference(
+             key = appContext.getPreferenceKey(R.string.pref_key_toolbar_bottom),
+-            default = { FxNimbus.features.defaultBottomToolbar.value().enabled },
++            default = { true },
+             persistDefaultIfNotExists = true,
+         )
+ 
