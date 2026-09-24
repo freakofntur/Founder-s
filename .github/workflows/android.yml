@@ -7,6 +7,15 @@ on:
     paths: ['android/**', '.github/workflows/android.yml']
   workflow_dispatch:
 
+# Publishing the "nightly" release needs write access to the repo's releases.
+permissions:
+  contents: write
+
+# A newer push supersedes an in-flight build instead of queueing behind it.
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -45,3 +54,16 @@ jobs:
           name: foundry-debug-apk
           path: android/firefox/objdir-foundry/gradle/build/mobile/android/fenix/app/outputs/apk/**/*.apk
           if-no-files-found: error
+
+      # One stable link for phones: always the latest build, a plain APK, no login or unzip needed.
+      - name: Publish to the "nightly" release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk=$(find android/firefox/objdir-foundry/gradle/build/mobile/android/fenix/app/outputs/apk -name '*arm64-v8a*.apk' | head -1)
+          cp "$apk" foundry-arm64.apk
+          gh release view nightly >/dev/null 2>&1 || \
+            gh release create nightly --prerelease --target "$GITHUB_SHA" --title "Foundry nightly" \
+              --notes "Latest Foundry debug build for 64-bit Android phones. Download foundry-arm64.apk and install it."
+          gh release upload nightly foundry-arm64.apk --clobber
