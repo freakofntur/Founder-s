@@ -119,6 +119,261 @@ index 2d733a28d4..dd23ba5599 100644
      }
  
      @OptIn(ExperimentalCoroutinesApi::class)
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryBrowsGuide.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryBrowsGuide.kt
+new file mode 100644
+index 0000000000..4a4fc992f5
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryBrowsGuide.kt
+@@ -0,0 +1,249 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.components.toolbar.gestures
++
++import android.animation.ValueAnimator
++import android.app.Activity
++import android.content.res.Configuration
++import android.graphics.Canvas
++import android.graphics.Color
++import android.graphics.LinearGradient
++import android.graphics.Paint
++import android.graphics.Path
++import android.graphics.PointF
++import android.graphics.RectF
++import android.graphics.Shader
++import android.view.HapticFeedbackConstants
++import android.view.View
++import android.view.ViewGroup
++import androidx.core.animation.doOnEnd
++import androidx.core.graphics.ColorUtils
++import androidx.interpolator.view.animation.FastOutSlowInInterpolator
++import kotlin.math.PI
++import kotlin.math.cos
++import kotlin.math.sin
++
++/**
++ * Draws [FoundrySwipeLimit] from where a swipe starts, as a pair of shaded eyebrows: a darker brow whose top edge is
++ * the limit, over a lighter shade covering the area under it. The brows grow in from their tails, darken as the
++ * finger nears them, turn the brand colour with a haptic tick when crossed, and fade once left behind.
++ *
++ * @param awayIsUp Whether "away from the toolbar" is up the screen (bottom toolbar) rather than down.
++ */
++class FoundryBrowsGuide(
++    private val activity: Activity,
++    private val limit: FoundrySwipeLimit,
++    private val awayIsUp: Boolean,
++) {
++    private val density = activity.resources.displayMetrics.density
++    private val isNight =
++        activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
++    private val shade = Color.parseColor(if (isNight) NIGHT_SHADE else DAY_SHADE)
++    private val brand = Color.parseColor(BRAND_COLOR)
++
++    private var view: BrowsView? = null
++    private var animator: ValueAnimator? = null
++    private var dismissing = false
++
++    /** @param start The raw screen position where the swipe started. */
++    fun show(start: PointF) {
++        remove()
++        val root = activity.window.decorView as? ViewGroup ?: return
++        val brows = BrowsView(start)
++        root.addView(brows, ViewGroup.LayoutParams(MATCH, MATCH))
++        view = brows
++        dismissing = false
++        animator =
++            ValueAnimator.ofFloat(0f, 1f).apply {
++                duration = APPEAR_MS
++                interpolator = FastOutSlowInInterpolator()
++                addUpdateListener {
++                    brows.drawn = it.animatedValue as Float
++                    brows.invalidate()
++                }
++                start()
++            }
++    }
++
++    /**
++     * @param dx Sideways finger movement since the start, in pixels.
++     * @param away Finger movement away from the toolbar's screen edge, in pixels.
++     * @param canCross Whether crossing would do anything (false e.g. when there is no page to go back to).
++     */
++    fun update(dx: Float, away: Float, canCross: Boolean) {
++        val brows = view ?: return
++        if (dismissing) return
++        val reach = limit.reach(dx, away)
++        val crossed = canCross && reach >= 1f
++        if (crossed != brows.crossed) {
++            brows.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
++            brows.crossed = crossed
++        }
++        brows.nearness = reach.coerceIn(0f, 1f)
++        brows.fade = if (reach < 1f) 1f else (1f - (reach - 1f) / FADE_BEYOND).coerceIn(0f, 1f)
++        brows.invalidate()
++    }
++
++    fun dismiss(quick: Boolean = false) {
++        val brows = view ?: return
++        if (dismissing) return
++        dismissing = true
++        animator?.cancel()
++        animator =
++            ValueAnimator.ofFloat(brows.fade, 0f).apply {
++                duration = if (quick) QUICK_DISMISS_MS else DISMISS_MS
++                addUpdateListener {
++                    brows.fade = it.animatedValue as Float
++                    brows.invalidate()
++                }
++                doOnEnd { if (view === brows) remove() }
++                start()
++            }
++    }
++
++    private fun remove() {
++        animator?.cancel()
++        animator = null
++        view?.let { (it.parent as? ViewGroup)?.removeView(it) }
++        view = null
++    }
++
++    private inner class BrowsView(private val start: PointF) : View(activity) {
++        var drawn = 0f
++        var fade = 1f
++        var nearness = 0f
++        var crossed = false
++
++        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
++        private val soft = Paint(Paint.ANTI_ALIAS_FLAG).apply {
++            style = Paint.Style.STROKE
++            strokeJoin = Paint.Join.ROUND
++        }
++        private val location = IntArray(2)
++        private val oval = RectF()
++        private val area = Path()
++        private val brows = Path()
++
++        init {
++            isClickable = false
++            isFocusable = false
++            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
++        }
++
++        override fun onDraw(canvas: Canvas) {
++            if (fade <= 0f || drawn <= 0f) return
++            getLocationOnScreen(location)
++            val cx = start.x - location[0]
++            val cy = start.y - location[1]
++            buildArea(cx, cy)
++            buildBrows(cx, cy)
++
++            canvas.save()
++            if (!awayIsUp) canvas.scale(1f, -1f, cx, cy)
++
++            val areaAlpha = fade * drawn * (AREA_ALPHA + AREA_NEAR_BOOST * nearness)
++            fill.shader =
++                LinearGradient(
++                    0f,
++                    cy - limit.eyeRadius,
++                    0f,
++                    cy,
++                    ColorUtils.setAlphaComponent(shade, (areaAlpha * OPAQUE).toInt()),
++                    Color.TRANSPARENT,
++                    Shader.TileMode.CLAMP,
++                )
++            canvas.drawPath(area, fill)
++            fill.shader = null
++
++            val browColor = if (crossed) brand else shade
++            val browAlpha = fade * (BROW_ALPHA + BROW_NEAR_BOOST * nearness)
++            soft.color = browColor
++            for (layer in SHADOW) {
++                soft.strokeWidth = layer.widthDp * density
++                soft.alpha = (layer.alpha * browAlpha * OPAQUE).toInt().coerceIn(0, OPAQUE)
++                canvas.drawPath(brows, soft)
++            }
++            fill.color = browColor
++            fill.alpha = (browAlpha * OPAQUE).toInt().coerceIn(0, OPAQUE)
++            canvas.drawPath(brows, fill)
++            canvas.restore()
++        }
++
++        /** The area under the limit: both brows' circles above the starting point's level. */
++        private fun buildArea(cx: Float, cy: Float) {
++            val d = limit.eyeOffset
++            val r = limit.eyeRadius
++            val sweep = limit.eyeSweepDegrees
++            area.reset()
++            oval.set(cx + d - r, cy - r, cx + d + r, cy + r)
++            area.arcTo(oval, 0f, -sweep, true)
++            oval.set(cx - d - r, cy - r, cx - d + r, cy + r)
++            area.arcTo(oval, 180f + sweep, -sweep)
++            area.close()
++        }
++
++        /** Each brow's top edge lies on the limit; it is thickest in the middle and tapers to a thin tail. */
++        private fun buildBrows(cx: Float, cy: Float) {
++            val d = limit.eyeOffset
++            val r = limit.eyeRadius
++            val sweep = Math.toRadians(limit.eyeSweepDegrees.toDouble())
++            val thickness = BROW_DP * density
++            brows.reset()
++            for (side in intArrayOf(1, -1)) {
++                val steps = (SAMPLES * drawn).toInt().coerceAtLeast(1)
++                for (i in 0..steps) {
++                    val u = i.toDouble() / SAMPLES
++                    val a = sweep * u
++                    val x = cx + side * (d + r * cos(a)).toFloat()
++                    val y = cy - (r * sin(a)).toFloat()
++                    if (i == 0) brows.moveTo(x, y) else brows.lineTo(x, y)
++                }
++                for (i in steps downTo 0) {
++                    val u = i.toDouble() / SAMPLES
++                    val a = sweep * u
++                    val inner = r - thickness * taper(u)
++                    brows.lineTo(cx + side * (d + inner * cos(a)).toFloat(), cy - (inner * sin(a)).toFloat())
++                }
++                brows.close()
++            }
++        }
++
++        private fun taper(u: Double) = (TAIL + (1 - TAIL) * sin(PI * u * PEAK_SPAN)).toFloat()
++    }
++
++    private class Layer(val widthDp: Float, val alpha: Float)
++
++    private companion object {
++        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
++        const val OPAQUE = 255
++        const val BRAND_COLOR = "#2B50E0"
++        const val DAY_SHADE = "#1A1D26"
++        const val NIGHT_SHADE = "#D9DEEE"
++
++        const val SAMPLES = 40
++        const val BROW_DP = 18f
++
++        /** Brow thickness at the tail, relative to its thickest. */
++        const val TAIL = 0.18
++
++        /** How much of a half sine wave the brow's thickness follows, from tail to inner end. */
++        const val PEAK_SPAN = 0.85
++
++        const val BROW_ALPHA = 0.42f
++        const val BROW_NEAR_BOOST = 0.3f
++        const val AREA_ALPHA = 0.12f
++        const val AREA_NEAR_BOOST = 0.06f
++
++        /** Soft edge around the brows, like a shadow: wide faint strokes. */
++        val SHADOW = listOf(Layer(14f, 0.08f), Layer(8f, 0.14f), Layer(3f, 0.3f))
++
++        /** How far past the limit, relative to it, the brows take to fade away. */
++        const val FADE_BEYOND = 0.5f
++
++        const val APPEAR_MS = 220L
++        const val DISMISS_MS = 200L
++        const val QUICK_DISMISS_MS = 120L
++    }
++}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryPageSnapshots.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryPageSnapshots.kt
 new file mode 100644
 index 0000000000..dfade5fcbf
@@ -223,59 +478,45 @@ index 0000000000..dfade5fcbf
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundrySwipeLimit.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundrySwipeLimit.kt
 new file mode 100644
-index 0000000000..898d5fd9af
+index 0000000000..970620a5b9
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundrySwipeLimit.kt
-@@ -0,0 +1,248 @@
+@@ -0,0 +1,55 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +package org.mozilla.fenix.components.toolbar.gestures
 +
-+import android.animation.ValueAnimator
-+import android.app.Activity
-+import android.graphics.Canvas
-+import android.graphics.Color
-+import android.graphics.Paint
-+import android.graphics.Path
-+import android.graphics.PointF
-+import android.graphics.RectF
-+import android.view.HapticFeedbackConstants
-+import android.view.View
-+import android.view.ViewGroup
-+import androidx.core.animation.doOnEnd
-+import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 +import kotlin.math.abs
 +import kotlin.math.atan2
-+import kotlin.math.cos
 +import kotlin.math.hypot
-+import kotlin.math.sin
 +import kotlin.math.sqrt
 +
 +/**
 + * The line a toolbar swipe has to cross to do anything: two arcs over the starting point, shaped like a pair of
-+ * closed, smiling anime eyes. Released inside them, the swipe does nothing; released outside, it goes back/forward
-+ * or opens the tab switcher's choice. The same shape is drawn by [FoundryEyesGuide], so what is shown is the limit.
++ * eyebrows. Released under them, the swipe does nothing; released past them, it goes back/forward or opens the tab
++ * switcher's choice. [FoundryBrowsGuide] draws the brows with their top edge on this line, so what is shown is the
++ * limit.
 + *
-+ * Each eye is the upper half of a circle beside the starting point; together they reach [SIDE_REACH_DP] sideways and
-+ * dip to [UP_REACH_DP] straight up, between the eyes.
++ * Each brow follows the upper half of a circle beside the starting point; together they reach [SIDE_REACH_DP]
++ * sideways and dip to [UP_REACH_DP] straight up, between the brows.
 + */
 +class FoundrySwipeLimit(density: Float) {
 +    private val side = SIDE_REACH_DP * density
 +    private val up = UP_REACH_DP * density
 +
-+    /** Distance from the starting point to each eye's centre. */
++    /** Distance from the starting point to the centre of each brow's circle. */
 +    val eyeOffset = (side * side - up * up) / (2 * side)
 +
-+    /** Radius of each eye. */
++    /** Radius of each brow's top edge. */
 +    val eyeRadius = side - eyeOffset
 +
-+    /** Angle, seen from an eye's centre, from its outer end to where the two eyes meet. */
++    /** Angle, seen from a brow's centre, from its outer tail to where the two brows meet. */
 +    val eyeSweepDegrees = (180.0 - Math.toDegrees(atan2(up.toDouble(), eyeOffset.toDouble()))).toFloat()
 +
 +    /**
-+     * How far a point is towards the limit along its direction: below 1 is inside the eyes, 1 or more has crossed.
++     * How far a point is towards the limit along its direction: below 1 is under the brows, 1 or more has crossed.
 +     *
 +     * @param dx Sideways distance from the starting point, in pixels.
 +     * @param away Distance away from the toolbar's screen edge, in pixels.
@@ -292,187 +533,8 @@ index 0000000000..898d5fd9af
 +    fun isCrossed(dx: Float, away: Float) = reach(dx, away) >= 1f
 +
 +    private companion object {
-+        const val SIDE_REACH_DP = 120f
-+        const val UP_REACH_DP = 72f
-+    }
-+}
-+
-+/**
-+ * Draws [FoundrySwipeLimit] from where a swipe starts: the eyes sweep closed from their outer corners as a soft,
-+ * glowing arc, brighten as the finger nears them, tick (haptically) when crossed, and fade once left behind.
-+ *
-+ * @param awayIsUp Whether "away from the toolbar" is up the screen (bottom toolbar) rather than down.
-+ */
-+class FoundryEyesGuide(
-+    private val activity: Activity,
-+    private val limit: FoundrySwipeLimit,
-+    private val awayIsUp: Boolean,
-+) {
-+    private val density = activity.resources.displayMetrics.density
-+    private val color = Color.parseColor(BRAND_COLOR)
-+
-+    private var view: EyesView? = null
-+    private var animator: ValueAnimator? = null
-+    private var dismissing = false
-+
-+    /** @param start The raw screen position where the swipe started. */
-+    fun show(start: PointF) {
-+        remove()
-+        val root = activity.window.decorView as? ViewGroup ?: return
-+        val eyes = EyesView(start)
-+        root.addView(eyes, ViewGroup.LayoutParams(MATCH, MATCH))
-+        view = eyes
-+        dismissing = false
-+        animator =
-+            ValueAnimator.ofFloat(0f, 1f).apply {
-+                duration = APPEAR_MS
-+                interpolator = FastOutSlowInInterpolator()
-+                addUpdateListener {
-+                    eyes.drawn = it.animatedValue as Float
-+                    eyes.invalidate()
-+                }
-+                start()
-+            }
-+    }
-+
-+    /**
-+     * @param dx Sideways finger movement since the start, in pixels.
-+     * @param away Finger movement away from the toolbar's screen edge, in pixels.
-+     * @param canCross Whether crossing would do anything (false e.g. when there is no page to go back to).
-+     */
-+    fun update(dx: Float, away: Float, canCross: Boolean) {
-+        val eyes = view ?: return
-+        if (dismissing) return
-+        val reach = limit.reach(dx, away)
-+        val crossed = canCross && reach >= 1f
-+        if (crossed != eyes.crossed) {
-+            eyes.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-+            eyes.crossed = crossed
-+        }
-+        eyes.emphasis = if (crossed) 1f else reach.coerceIn(0f, 1f) * NEAR_EMPHASIS
-+        eyes.fade = if (reach < 1f) 1f else (1f - (reach - 1f) / FADE_BEYOND).coerceIn(0f, 1f)
-+        eyes.invalidate()
-+    }
-+
-+    fun dismiss(quick: Boolean = false) {
-+        val eyes = view ?: return
-+        if (dismissing) return
-+        dismissing = true
-+        animator?.cancel()
-+        val from = eyes.fade
-+        animator =
-+            ValueAnimator.ofFloat(from, 0f).apply {
-+                duration = if (quick) QUICK_DISMISS_MS else DISMISS_MS
-+                addUpdateListener {
-+                    eyes.fade = it.animatedValue as Float
-+                    eyes.invalidate()
-+                }
-+                doOnEnd { if (view === eyes) remove() }
-+                start()
-+            }
-+    }
-+
-+    private fun remove() {
-+        animator?.cancel()
-+        animator = null
-+        view?.let { (it.parent as? ViewGroup)?.removeView(it) }
-+        view = null
-+    }
-+
-+    private inner class EyesView(private val start: PointF) : View(activity) {
-+        var drawn = 0f
-+        var fade = 1f
-+        var emphasis = 0f
-+        var crossed = false
-+
-+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-+            style = Paint.Style.STROKE
-+            strokeCap = Paint.Cap.ROUND
-+            strokeJoin = Paint.Join.ROUND
-+            color = this@FoundryEyesGuide.color
-+        }
-+        private val location = IntArray(2)
-+        private val oval = RectF()
-+        private val arcs = Path()
-+        private val lashes = Path()
-+
-+        init {
-+            isClickable = false
-+            isFocusable = false
-+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-+        }
-+
-+        override fun onDraw(canvas: Canvas) {
-+            if (fade <= 0f || drawn <= 0f) return
-+            getLocationOnScreen(location)
-+            val cx = start.x - location[0]
-+            val cy = start.y - location[1]
-+            buildPaths(cx, cy)
-+
-+            canvas.save()
-+            if (!awayIsUp) canvas.scale(1f, -1f, cx, cy)
-+            val strength = fade * (BASE_STRENGTH + (1f - BASE_STRENGTH) * emphasis)
-+            for (layer in GLOW) {
-+                paint.strokeWidth = layer.widthDp * density * (1f + GLOW_GROWTH * emphasis)
-+                paint.alpha = (layer.alpha * strength * OPAQUE).toInt().coerceIn(0, OPAQUE)
-+                canvas.drawPath(arcs, paint)
-+                canvas.drawPath(lashes, paint)
-+            }
-+            canvas.restore()
-+        }
-+
-+        private fun buildPaths(cx: Float, cy: Float) {
-+            val d = limit.eyeOffset
-+            val r = limit.eyeRadius
-+            val sweep = limit.eyeSweepDegrees * drawn
-+            arcs.reset()
-+            oval.set(cx + d - r, cy - r, cx + d + r, cy + r)
-+            arcs.arcTo(oval, 0f, -sweep, true)
-+            oval.set(cx - d - r, cy - r, cx - d + r, cy + r)
-+            arcs.arcTo(oval, 180f, sweep, true)
-+
-+            lashes.reset()
-+            val lashProgress = ((drawn - LASH_START) / (1f - LASH_START)).coerceIn(0f, 1f)
-+            if (lashProgress <= 0f) return
-+            val base = Math.toRadians(LASH_BASE_DEGREES.toDouble())
-+            val length = LASH_DP * density * lashProgress
-+            for (side in intArrayOf(1, -1)) {
-+                val bx = cx + side * (d + r * cos(base).toFloat())
-+                val by = cy - r * sin(base).toFloat()
-+                for (degrees in LASH_DEGREES) {
-+                    val a = Math.toRadians(degrees.toDouble())
-+                    lashes.moveTo(bx, by)
-+                    lashes.lineTo(bx + side * length * cos(a).toFloat(), by - length * sin(a).toFloat())
-+                }
-+            }
-+        }
-+    }
-+
-+    private class Glow(val widthDp: Float, val alpha: Float)
-+
-+    private companion object {
-+        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
-+        const val OPAQUE = 255
-+        const val BRAND_COLOR = "#2B50E0"
-+
-+        /** Soft halo around the line: wide faint strokes under a narrow solid one. */
-+        val GLOW = listOf(Glow(22f, 0.06f), Glow(13f, 0.12f), Glow(7f, 0.28f), Glow(3f, 0.9f))
-+        const val GLOW_GROWTH = 0.35f
-+        const val BASE_STRENGTH = 0.55f
-+        const val NEAR_EMPHASIS = 0.6f
-+
-+        /** How far past the limit, relative to it, the eyes take to fade away. */
-+        const val FADE_BEYOND = 0.5f
-+
-+        /** Where on each eye, from its outer corner, the lashes grow, and their directions (outward, upward). */
-+        const val LASH_BASE_DEGREES = 14f
-+        val LASH_DEGREES = floatArrayOf(22f, 48f)
-+        const val LASH_DP = 10f
-+        const val LASH_START = 0.7f
-+
-+        const val APPEAR_MS = 220L
-+        const val DISMISS_MS = 200L
-+        const val QUICK_DISMISS_MS = 120L
++        const val SIDE_REACH_DP = 160f
++        const val UP_REACH_DP = 100f
 +    }
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryTabSwitcher.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryTabSwitcher.kt
@@ -777,10 +839,10 @@ index 0000000000..d893cc24e3
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt
 new file mode 100644
-index 0000000000..9584bec30f
+index 0000000000..3b6e93a9ae
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt
-@@ -0,0 +1,332 @@
+@@ -0,0 +1,340 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -835,7 +897,7 @@ index 0000000000..9584bec30f
 + * @param tabSwitcher The card tab switcher, or null to disable the upward gesture.
 + * @param onSwipeStarted Called when a swipe is recognised, e.g. to capture a thumbnail.
 + *
-+ * Nothing happens unless the finger (with momentum) ends past the [FoundrySwipeLimit], which [FoundryEyesGuide]
++ * Nothing happens unless the finger (with momentum) ends past the [FoundrySwipeLimit], which [FoundryBrowsGuide]
 + * draws while the swipe is under way.
 + */
 +@Suppress("LongParameterList", "TooManyFunctions")
@@ -862,20 +924,23 @@ index 0000000000..9584bec30f
 +    private var dy = 0f
 +    private var startedInSystemGestureInset = false
 +    private var underlay: FrameLayout? = null
++    private var navigating = false
 +    private val limit = FoundrySwipeLimit(density)
-+    private val eyes = FoundryEyesGuide(activity, limit, awayIsUp = toolbarPosition == ToolbarPosition.BOTTOM)
++    private val brows = FoundryBrowsGuide(activity, limit, awayIsUp = toolbarPosition == ToolbarPosition.BOTTOM)
 +
 +    override fun onSwipeStarted(start: PointF, next: PointF): Boolean {
 +        if (activity.window.decorView.isKeyboardVisible() || !start.isInBars()) {
 +            return false
 +        }
++        // Let the previous gesture's animation finish first.
++        if (navigating || tabSwitcher?.isActive == true) return false
 +        mode = Mode.UNDECIDED
 +        dx = next.x - start.x
 +        dy = next.y - start.y
 +        startedInSystemGestureInset = start.isInSystemGestureInset()
-+        eyes.show(start)
++        brows.show(start)
 +        classifyWhenReady()
-+        updateEyes()
++        updateBrows()
 +        return true
 +    }
 +
@@ -883,7 +948,7 @@ index 0000000000..9584bec30f
 +        dx -= distanceX
 +        dy -= distanceY
 +        classifyWhenReady()
-+        updateEyes()
++        updateBrows()
 +
 +        when (mode) {
 +            Mode.BACK_FORWARD -> updateBackForward()
@@ -894,7 +959,7 @@ index 0000000000..9584bec30f
 +
 +    override fun onSwipeFinished(velocityX: Float, velocityY: Float) {
 +        val velocityAway = if (toolbarPosition == ToolbarPosition.BOTTOM) -velocityY else velocityY
-+        // Where the finger would be once its momentum is spent, judged against the eyes.
++        // Where the finger would be once its momentum is spent, judged against the brows.
 +        val projectedX = dx + velocityX * MOMENTUM_SECONDS
 +        val projectedAway = awayFromEdge() + velocityAway * MOMENTUM_SECONDS
 +        val crossed = limit.isCrossed(projectedX, projectedAway)
@@ -903,15 +968,15 @@ index 0000000000..9584bec30f
 +            Mode.TAB_SWITCHER -> tabSwitcher?.finish(velocityX, crossed)
 +            else -> Unit
 +        }
-+        eyes.dismiss()
++        brows.dismiss()
 +        mode = Mode.UNDECIDED
 +    }
 +
-+    private fun updateEyes() {
++    private fun updateBrows() {
 +        when (mode) {
-+            Mode.UNDECIDED, Mode.TAB_SWITCHER -> eyes.update(dx, awayFromEdge(), canCross = true)
-+            Mode.BACK_FORWARD -> eyes.update(dx, awayFromEdge(), canCross = canNavigate())
-+            Mode.IGNORED -> eyes.dismiss(quick = true)
++            Mode.UNDECIDED, Mode.TAB_SWITCHER -> brows.update(dx, awayFromEdge(), canCross = true)
++            Mode.BACK_FORWARD -> brows.update(dx, awayFromEdge(), canCross = canNavigate())
++            Mode.IGNORED -> brows.dismiss(quick = true)
 +        }
 +    }
 +
@@ -1002,6 +1067,7 @@ index 0000000000..9584bec30f
 +            return
 +        }
 +
++        navigating = true
 +        val goingBack = isGoingBack()
 +        val tab = store.state.selectedTab
 +        val fromUrl = tab?.content?.url
@@ -1035,13 +1101,17 @@ index 0000000000..9584bec30f
 +    }
 +
 +    private fun fadeOutUnderlay() {
-+        val holder = underlay ?: return
++        val holder = underlay ?: run {
++            navigating = false
++            return
++        }
 +        holder.animate().alpha(0f).setDuration(FADE_DURATION_MS).withEndAction { removeUnderlay() }.start()
 +    }
 +
 +    private fun removeUnderlay() {
 +        underlay?.let { (it.parent as? ViewGroup)?.removeView(it) }
 +        underlay = null
++        navigating = false
 +    }
 +
 +    private fun PointF.isInBars(): Boolean {
