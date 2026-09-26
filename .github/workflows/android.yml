@@ -45,6 +45,10 @@ jobs:
       - name: Apply Foundry patches
         run: android/scripts/apply.sh
 
+      # Every build is signed with the same key, so a new APK installs over the previous one.
+      - name: Install Foundry's debug signing key
+        run: mkdir -p ~/.android && cp android/signing/foundry-debug.keystore ~/.android/debug.keystore
+
       - name: Build
         run: android/scripts/build.sh
 
