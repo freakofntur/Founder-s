@@ -376,10 +376,10 @@ index 0000000000..4a4fc992f5
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryPageSnapshots.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryPageSnapshots.kt
 new file mode 100644
-index 0000000000..dfade5fcbf
+index 0000000000..9ebc6eac51
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryPageSnapshots.kt
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,115 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -398,6 +398,8 @@ index 0000000000..dfade5fcbf
 +import androidx.core.graphics.scale
 +import mozilla.components.browser.state.state.TabSessionState
 +import mozilla.components.concept.engine.EngineView
++import mozilla.components.concept.engine.utils.ABOUT_HOME_URL
++import mozilla.components.support.base.log.logger.Logger
 +import org.mozilla.fenix.R
 +import org.mozilla.fenix.theme.ThemeManager
 +import com.google.android.material.R as materialR
@@ -428,16 +430,33 @@ index 0000000000..dfade5fcbf
 +        return entry.bitmap.takeIf { item == null || entry.url == item.uri }
 +    }
 +
-+    /** Captures what [engineView] currently shows as the snapshot of [tab]'s current history entry. */
++    /**
++     * Captures what [engineView] currently shows as the snapshot of [tab]'s current history entry. Does nothing (and
++     * reports null) when the page is not on screen, e.g. while switching to the home screen, where capturing would
++     * fail on a zero-sized surface.
++     */
 +    fun capture(engineView: EngineView, tab: TabSessionState, onCaptured: (Bitmap?) -> Unit = {}) {
++        val view = engineView.asView()
++        if (tab.content.url == ABOUT_HOME_URL || !view.isAttachedToWindow || !view.isShown ||
++            view.width <= 0 || view.height <= 0
++        ) {
++            onCaptured(null)
++            return
++        }
 +        val index = tab.content.history.currentIndex
 +        val url = tab.content.url
-+        engineView.captureThumbnail { bitmap ->
-+            if (bitmap != null && bitmap.width > 0 && bitmap.height > 0) {
-+                val small = bitmap.scale((bitmap.width * SCALE).toInt(), (bitmap.height * SCALE).toInt())
-+                cache.put(key(tab.id, index), Entry(url, small))
++        try {
++            engineView.captureThumbnail { bitmap ->
++                val usable = bitmap?.takeIf { !it.isRecycled && it.width > 0 && it.height > 0 }
++                if (usable != null) {
++                    runCatching { usable.scale((usable.width * SCALE).toInt(), (usable.height * SCALE).toInt()) }
++                        .onSuccess { small -> cache.put(key(tab.id, index), Entry(url, small)) }
++                }
++                onCaptured(usable)
 +            }
-+            onCaptured(bitmap)
++        } catch (e: RuntimeException) {
++            Logger.warn("Could not snapshot the page", e)
++            onCaptured(null)
 +        }
 +    }
 +
