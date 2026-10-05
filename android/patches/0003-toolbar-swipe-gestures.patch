@@ -121,10 +121,10 @@ index 2d733a28d4..dd23ba5599 100644
      @OptIn(ExperimentalCoroutinesApi::class)
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryBrowsGuide.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryBrowsGuide.kt
 new file mode 100644
-index 0000000000..4a4fc992f5
+index 0000000000..a0e729fa62
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryBrowsGuide.kt
-@@ -0,0 +1,249 @@
+@@ -0,0 +1,298 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -140,7 +140,6 @@ index 0000000000..4a4fc992f5
 +import android.graphics.Paint
 +import android.graphics.Path
 +import android.graphics.PointF
-+import android.graphics.RectF
 +import android.graphics.Shader
 +import android.view.HapticFeedbackConstants
 +import android.view.View
@@ -149,13 +148,15 @@ index 0000000000..4a4fc992f5
 +import androidx.core.graphics.ColorUtils
 +import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 +import kotlin.math.PI
-+import kotlin.math.cos
++import kotlin.math.abs
 +import kotlin.math.sin
 +
 +/**
 + * Draws [FoundrySwipeLimit] from where a swipe starts, as a pair of shaded eyebrows: a darker brow whose top edge is
-+ * the limit, over a lighter shade covering the area under it. The brows grow in from their tails, darken as the
-+ * finger nears them, turn the brand colour with a haptic tick when crossed, and fade once left behind.
++ * the limit, over a lighter shade covering the area under it.
++ *
++ * Crossing the limit is shown differently for each gesture: going back/forward lights up the brow on that side;
++ * moving to a neighbouring tab raises the brow on that side; heading up to the tabs tray raises both.
 + *
 + * @param awayIsUp Whether "away from the toolbar" is up the screen (bottom toolbar) rather than down.
 + */
@@ -164,6 +165,9 @@ index 0000000000..4a4fc992f5
 +    private val limit: FoundrySwipeLimit,
 +    private val awayIsUp: Boolean,
 +) {
++    /** What the swipe has been recognised as, which decides how crossing the limit is shown. */
++    enum class Style { UNDECIDED, BACK_FORWARD, TABS }
++
 +    private val density = activity.resources.displayMetrics.density
 +    private val isNight =
 +        activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
@@ -197,9 +201,10 @@ index 0000000000..4a4fc992f5
 +    /**
 +     * @param dx Sideways finger movement since the start, in pixels.
 +     * @param away Finger movement away from the toolbar's screen edge, in pixels.
++     * @param style What the swipe has been recognised as.
 +     * @param canCross Whether crossing would do anything (false e.g. when there is no page to go back to).
 +     */
-+    fun update(dx: Float, away: Float, canCross: Boolean) {
++    fun update(dx: Float, away: Float, style: Style, canCross: Boolean) {
 +        val brows = view ?: return
 +        if (dismissing) return
 +        val reach = limit.reach(dx, away)
@@ -208,8 +213,25 @@ index 0000000000..4a4fc992f5
 +            brows.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
 +            brows.crossed = crossed
 +        }
++        // Index 0 is the brow on the right of the starting point, 1 the one on the left.
++        val side = if (dx >= 0f) 0 else 1
++        for (i in 0..1) {
++            brows.lightTarget[i] = if (crossed && style == Style.BACK_FORWARD && i == side) 1f else 0f
++            brows.raiseTarget[i] =
++                when {
++                    !crossed || style != Style.TABS -> 0f
++                    !limit.isToTheSide(dx) -> 1f
++                    i == side -> 1f
++                    else -> 0f
++                }
++        }
 +        brows.nearness = reach.coerceIn(0f, 1f)
-+        brows.fade = if (reach < 1f) 1f else (1f - (reach - 1f) / FADE_BEYOND).coerceIn(0f, 1f)
++        brows.fade =
++            if (style == Style.BACK_FORWARD && reach > 1f) {
++                (1f - (reach - 1f) / FADE_BEYOND).coerceIn(0f, 1f)
++            } else {
++                1f
++            }
 +        brows.invalidate()
 +    }
 +
@@ -242,6 +264,10 @@ index 0000000000..4a4fc992f5
 +        var fade = 1f
 +        var nearness = 0f
 +        var crossed = false
++        val lightTarget = FloatArray(2)
++        val raiseTarget = FloatArray(2)
++        private val light = FloatArray(2)
++        private val raise = FloatArray(2)
 +
 +        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
 +        private val soft = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -249,9 +275,8 @@ index 0000000000..4a4fc992f5
 +            strokeJoin = Paint.Join.ROUND
 +        }
 +        private val location = IntArray(2)
-+        private val oval = RectF()
 +        private val area = Path()
-+        private val brows = Path()
++        private val brow = Path()
 +
 +        init {
 +            isClickable = false
@@ -261,83 +286,102 @@ index 0000000000..4a4fc992f5
 +
 +        override fun onDraw(canvas: Canvas) {
 +            if (fade <= 0f || drawn <= 0f) return
++            val settling = step(light, lightTarget) or step(raise, raiseTarget)
 +            getLocationOnScreen(location)
 +            val cx = start.x - location[0]
 +            val cy = start.y - location[1]
-+            buildArea(cx, cy)
-+            buildBrows(cx, cy)
 +
 +            canvas.save()
 +            if (!awayIsUp) canvas.scale(1f, -1f, cx, cy)
++            drawArea(canvas, cx, cy)
++            for (i in 0..1) drawBrow(canvas, cx, cy, if (i == 0) 1 else -1, i)
++            canvas.restore()
 +
-+            val areaAlpha = fade * drawn * (AREA_ALPHA + AREA_NEAR_BOOST * nearness)
++            if (settling) postInvalidateOnAnimation()
++        }
++
++        /** Moves each value part of the way to its target; returns whether any is still moving. */
++        private fun step(values: FloatArray, targets: FloatArray): Boolean {
++            var moving = false
++            for (i in values.indices) {
++                val delta = targets[i] - values[i]
++                if (abs(delta) < SETTLED) {
++                    values[i] = targets[i]
++                } else {
++                    values[i] += delta * EASE
++                    moving = true
++                }
++            }
++            return moving
++        }
++
++        private fun drawArea(canvas: Canvas, cx: Float, cy: Float) {
++            val reach = limit.sideReach
++            area.reset()
++            area.moveTo(cx - reach, cy)
++            for (i in 0..SAMPLES * 2) {
++                val x = -reach + 2 * reach * i / (SAMPLES * 2)
++                area.lineTo(cx + x, cy - limit.heightAt(x))
++            }
++            area.lineTo(cx + reach, cy)
++            area.close()
++            val alpha = fade * drawn * (AREA_ALPHA + AREA_NEAR_BOOST * nearness)
 +            fill.shader =
 +                LinearGradient(
 +                    0f,
-+                    cy - limit.eyeRadius,
++                    cy - limit.heightAt(reach / 2),
 +                    0f,
 +                    cy,
-+                    ColorUtils.setAlphaComponent(shade, (areaAlpha * OPAQUE).toInt()),
++                    ColorUtils.setAlphaComponent(shade, (alpha * OPAQUE).toInt()),
 +                    Color.TRANSPARENT,
 +                    Shader.TileMode.CLAMP,
 +                )
 +            canvas.drawPath(area, fill)
 +            fill.shader = null
++        }
 +
-+            val browColor = if (crossed) brand else shade
-+            val browAlpha = fade * (BROW_ALPHA + BROW_NEAR_BOOST * nearness)
-+            soft.color = browColor
++        /**
++         * One brow, from its head beside the starting point out to its tail. Its top edge lies on the limit, it is
++         * thickest at the head, and raising it lifts it and deepens its arch.
++         */
++        private fun drawBrow(canvas: Canvas, cx: Float, cy: Float, side: Int, index: Int) {
++            val from = limit.browStart
++            val to = from + (limit.sideReach - from) * drawn
++            val thickness = BROW_DP * density
++            val lift = RAISE_DP * density * raise[index]
++            brow.reset()
++            for (i in 0..SAMPLES) {
++                val x = from + (to - from) * i / SAMPLES
++                val u = (x - from) / (limit.sideReach - from)
++                val y = cy - limit.heightAt(x) - lift * arch(u)
++                if (i == 0) brow.moveTo(cx + side * x, y) else brow.lineTo(cx + side * x, y)
++            }
++            for (i in SAMPLES downTo 0) {
++                val x = from + (to - from) * i / SAMPLES
++                val u = (x - from) / (limit.sideReach - from)
++                val y = cy - limit.heightAt(x) - lift * arch(u) + thickness * taper(u)
++                brow.lineTo(cx + side * x, y)
++            }
++            brow.close()
++
++            val color = ColorUtils.blendARGB(shade, brand, light[index])
++            val strength = fade * (BROW_ALPHA + BROW_NEAR_BOOST * nearness + LIT_BOOST * light[index])
++            soft.color = color
 +            for (layer in SHADOW) {
 +                soft.strokeWidth = layer.widthDp * density
-+                soft.alpha = (layer.alpha * browAlpha * OPAQUE).toInt().coerceIn(0, OPAQUE)
-+                canvas.drawPath(brows, soft)
++                soft.alpha = (layer.alpha * strength * OPAQUE).toInt().coerceIn(0, OPAQUE)
++                canvas.drawPath(brow, soft)
 +            }
-+            fill.color = browColor
-+            fill.alpha = (browAlpha * OPAQUE).toInt().coerceIn(0, OPAQUE)
-+            canvas.drawPath(brows, fill)
-+            canvas.restore()
++            fill.color = color
++            fill.alpha = (strength * OPAQUE).toInt().coerceIn(0, OPAQUE)
++            canvas.drawPath(brow, fill)
 +        }
 +
-+        /** The area under the limit: both brows' circles above the starting point's level. */
-+        private fun buildArea(cx: Float, cy: Float) {
-+            val d = limit.eyeOffset
-+            val r = limit.eyeRadius
-+            val sweep = limit.eyeSweepDegrees
-+            area.reset()
-+            oval.set(cx + d - r, cy - r, cx + d + r, cy + r)
-+            area.arcTo(oval, 0f, -sweep, true)
-+            oval.set(cx - d - r, cy - r, cx - d + r, cy + r)
-+            area.arcTo(oval, 180f + sweep, -sweep)
-+            area.close()
-+        }
++        /** How much of the raise each point along the brow gets: some everywhere, most at the arch. */
++        private fun arch(u: Float) = RAISE_BASE + (1 - RAISE_BASE) * sin(PI * u).toFloat()
 +
-+        /** Each brow's top edge lies on the limit; it is thickest in the middle and tapers to a thin tail. */
-+        private fun buildBrows(cx: Float, cy: Float) {
-+            val d = limit.eyeOffset
-+            val r = limit.eyeRadius
-+            val sweep = Math.toRadians(limit.eyeSweepDegrees.toDouble())
-+            val thickness = BROW_DP * density
-+            brows.reset()
-+            for (side in intArrayOf(1, -1)) {
-+                val steps = (SAMPLES * drawn).toInt().coerceAtLeast(1)
-+                for (i in 0..steps) {
-+                    val u = i.toDouble() / SAMPLES
-+                    val a = sweep * u
-+                    val x = cx + side * (d + r * cos(a)).toFloat()
-+                    val y = cy - (r * sin(a)).toFloat()
-+                    if (i == 0) brows.moveTo(x, y) else brows.lineTo(x, y)
-+                }
-+                for (i in steps downTo 0) {
-+                    val u = i.toDouble() / SAMPLES
-+                    val a = sweep * u
-+                    val inner = r - thickness * taper(u)
-+                    brows.lineTo(cx + side * (d + inner * cos(a)).toFloat(), cy - (inner * sin(a)).toFloat())
-+                }
-+                brows.close()
-+            }
-+        }
-+
-+        private fun taper(u: Double) = (TAIL + (1 - TAIL) * sin(PI * u * PEAK_SPAN)).toFloat()
++        /** Brow thickness along its length: a rounded head, thick just after it, thinning to the tail. */
++        private fun taper(u: Float) = (1 - TAIL_THINNING * u) * (HEAD_ROUNDING + u * HEAD_RAMP).coerceAtMost(1f)
 +    }
 +
 +    private class Layer(val widthDp: Float, val alpha: Float)
@@ -349,25 +393,30 @@ index 0000000000..4a4fc992f5
 +        const val DAY_SHADE = "#1A1D26"
 +        const val NIGHT_SHADE = "#D9DEEE"
 +
-+        const val SAMPLES = 40
-+        const val BROW_DP = 18f
++        const val SAMPLES = 36
++        const val BROW_DP = 16f
++        const val TAIL_THINNING = 0.75f
++        const val HEAD_ROUNDING = 0.45f
++        const val HEAD_RAMP = 6f
 +
-+        /** Brow thickness at the tail, relative to its thickest. */
-+        const val TAIL = 0.18
-+
-+        /** How much of a half sine wave the brow's thickness follows, from tail to inner end. */
-+        const val PEAK_SPAN = 0.85
++        const val RAISE_DP = 14f
++        const val RAISE_BASE = 0.5f
 +
 +        const val BROW_ALPHA = 0.42f
 +        const val BROW_NEAR_BOOST = 0.3f
++        const val LIT_BOOST = 0.25f
 +        const val AREA_ALPHA = 0.12f
 +        const val AREA_NEAR_BOOST = 0.06f
 +
 +        /** Soft edge around the brows, like a shadow: wide faint strokes. */
 +        val SHADOW = listOf(Layer(14f, 0.08f), Layer(8f, 0.14f), Layer(3f, 0.3f))
 +
-+        /** How far past the limit, relative to it, the brows take to fade away. */
++        /** How far past the limit, relative to it, the brows take to fade away while going back/forward. */
 +        const val FADE_BEYOND = 0.5f
++
++        /** Per frame, how much of the remaining way a brow moves when lighting up or raising. */
++        const val EASE = 0.25f
++        const val SETTLED = 0.01f
 +
 +        const val APPEAR_MS = 220L
 +        const val DISMISS_MS = 200L
@@ -497,71 +546,82 @@ index 0000000000..9ebc6eac51
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundrySwipeLimit.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundrySwipeLimit.kt
 new file mode 100644
-index 0000000000..970620a5b9
+index 0000000000..a406fcc40c
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundrySwipeLimit.kt
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,66 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +package org.mozilla.fenix.components.toolbar.gestures
 +
++import kotlin.math.PI
 +import kotlin.math.abs
-+import kotlin.math.atan2
-+import kotlin.math.hypot
-+import kotlin.math.sqrt
++import kotlin.math.max
++import kotlin.math.sin
 +
 +/**
-+ * The line a toolbar swipe has to cross to do anything: two arcs over the starting point, shaped like a pair of
-+ * eyebrows. Released under them, the swipe does nothing; released past them, it goes back/forward or opens the tab
-+ * switcher's choice. [FoundryBrowsGuide] draws the brows with their top edge on this line, so what is shown is the
-+ * limit.
++ * The line a toolbar swipe has to cross to do anything, shaped like a pair of eyebrows over the starting point.
++ * Released under it, the swipe does nothing; released past it, it goes back/forward, to the neighbouring tab or to
++ * the tabs tray. [FoundryBrowsGuide] draws the brows with their top edge on this line, so what is shown is the limit.
 + *
-+ * Each brow follows the upper half of a circle beside the starting point; together they reach [SIDE_REACH_DP]
-+ * sideways and dip to [UP_REACH_DP] straight up, between the brows.
++ * Each brow starts low beside the starting point ([HEAD_DP] up), arches up to [PEAK_DP] and falls to a tail
++ * [SIDE_REACH_DP] to the side; past the tail, moving that far sideways crosses the limit at any height.
 + */
-+class FoundrySwipeLimit(density: Float) {
-+    private val side = SIDE_REACH_DP * density
-+    private val up = UP_REACH_DP * density
++class FoundrySwipeLimit(private val density: Float) {
++    /** How far sideways a brow reaches, in pixels. */
++    val sideReach = SIDE_REACH_DP * density
 +
-+    /** Distance from the starting point to the centre of each brow's circle. */
-+    val eyeOffset = (side * side - up * up) / (2 * side)
++    /** Where a brow begins, sideways from the starting point, in pixels. */
++    val browStart = BROW_GAP_DP * density
 +
-+    /** Radius of each brow's top edge. */
-+    val eyeRadius = side - eyeOffset
-+
-+    /** Angle, seen from a brow's centre, from its outer tail to where the two brows meet. */
-+    val eyeSweepDegrees = (180.0 - Math.toDegrees(atan2(up.toDouble(), eyeOffset.toDouble()))).toFloat()
++    /** Height of the brow's top edge above the starting point, [x] pixels to either side. */
++    fun heightAt(x: Float): Float {
++        val dp = (abs(x) / density).coerceAtMost(SIDE_REACH_DP)
++        val height =
++            if (dp <= PEAK_AT_DP) {
++                HEAD_DP + (PEAK_DP - HEAD_DP) * sin(PI / 2 * dp / PEAK_AT_DP).toFloat()
++            } else {
++                val u = (dp - PEAK_AT_DP) / (SIDE_REACH_DP - PEAK_AT_DP)
++                PEAK_DP - (PEAK_DP - TAIL_DP) * u * u
++            }
++        return height * density
++    }
 +
 +    /**
-+     * How far a point is towards the limit along its direction: below 1 is under the brows, 1 or more has crossed.
++     * How far a point is towards the limit: below 1 is under the brows, 1 or more has crossed.
 +     *
 +     * @param dx Sideways distance from the starting point, in pixels.
 +     * @param away Distance away from the toolbar's screen edge, in pixels.
 +     */
 +    fun reach(dx: Float, away: Float): Float {
-+        val distance = hypot(dx, away)
-+        if (distance == 0f) return 0f
-+        val c = abs(dx) / distance
-+        val d = eyeOffset
-+        val limit = d * c + sqrt(d * d * c * c - d * d + eyeRadius * eyeRadius)
-+        return distance / limit
++        val sideways = abs(dx) / sideReach
++        val up = if (away > 0f) away / heightAt(dx) else 0f
++        return max(sideways, up)
 +    }
 +
 +    fun isCrossed(dx: Float, away: Float) = reach(dx, away) >= 1f
 +
++    /** Whether a point past the limit went out to one side (rather than up over the middle). */
++    fun isToTheSide(dx: Float) = abs(dx) >= SIDE_SPLIT_DP * density
++
 +    private companion object {
-+        const val SIDE_REACH_DP = 160f
-+        const val UP_REACH_DP = 100f
++        const val SIDE_REACH_DP = 172f
++        const val HEAD_DP = 92f
++        const val PEAK_DP = 122f
++        const val PEAK_AT_DP = 118f
++        const val TAIL_DP = 64f
++        const val BROW_GAP_DP = 10f
++        const val SIDE_SPLIT_DP = 64f
 +    }
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryTabSwitcher.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryTabSwitcher.kt
 new file mode 100644
-index 0000000000..d893cc24e3
+index 0000000000..ad9bbe1efc
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryTabSwitcher.kt
-@@ -0,0 +1,294 @@
+@@ -0,0 +1,418 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -569,6 +629,7 @@ index 0000000000..d893cc24e3
 +package org.mozilla.fenix.components.toolbar.gestures
 +
 +import android.animation.ValueAnimator
++import android.content.Context
 +import android.graphics.Bitmap
 +import android.graphics.Color
 +import android.graphics.Outline
@@ -582,8 +643,11 @@ index 0000000000..d893cc24e3
 +import android.widget.ImageView
 +import android.widget.TextView
 +import androidx.core.animation.doOnEnd
++import androidx.core.content.ContextCompat
++import androidx.core.graphics.ColorUtils
++import androidx.core.view.ViewCompat
++import androidx.core.view.WindowInsetsCompat
 +import androidx.interpolator.view.animation.FastOutSlowInInterpolator
-+import kotlin.math.roundToInt
 +import mozilla.components.browser.state.selector.getNormalOrPrivateTabs
 +import mozilla.components.browser.state.selector.selectedTab
 +import mozilla.components.browser.state.state.TabSessionState
@@ -591,16 +655,16 @@ index 0000000000..d893cc24e3
 +import mozilla.components.browser.thumbnails.loader.ThumbnailLoader
 +import mozilla.components.concept.base.images.ImageLoadRequest
 +import org.mozilla.fenix.ext.components
++import org.mozilla.fenix.theme.ThemeManager
++import com.google.android.material.R as materialR
 +
 +/**
 + * The card-based tab switcher driven by the toolbar's upward swipe, in the style of Android's recent apps.
 + *
 + * While the finger is down the current page shrinks into a card that follows it, with the neighbouring tabs beside
-+ * it; moving sideways slides through them. On release the gesture's momentum is projected forward (as Android does
-+ * for its recents), then: if it stayed inside the [FoundrySwipeLimit] the page is restored; otherwise the card it
-+ * lands on opens full screen, or, if that is still the current tab, the full tabs tray opens.
-+ *
-+ * Distances are in dp rather than fractions of the screen, as Android's own gesture thresholds are.
++ * it; moving sideways slides through them. The card can rise no higher than the spot it takes in the tabs tray. On
++ * release the gesture handler decides the [Outcome]: the page is restored, a neighbouring card opens full screen, or
++ * the card settles into its spot in the tabs tray's grid and the tray opens behind it.
 + *
 + * @param container The view the overlay is drawn over, normally the fragment's [SwipeGestureLayout].
 + * @param captureCurrent Delivers a fresh snapshot of the current page, used for the current tab's card.
@@ -617,11 +681,35 @@ index 0000000000..d893cc24e3
 +    private val onShowTabsTray: () -> Unit,
 +    private val toolbarAtBottom: Boolean,
 +) {
-+    private class Card(val index: Int, val root: FrameLayout, val title: TextView)
++    /** How a swipe in the tab switcher ends. */
++    enum class Outcome { STAY, PREVIOUS_TAB, NEXT_TAB, TABS_TRAY }
++
++    /** Where a card is drawn: its horizontal centre, top edge, scale, visible height (unscaled) and opacity. */
++    private data class Frame(val centerX: Float, val top: Float, val scale: Float, val clip: Float, val alpha: Float)
++
++    private class CardView(context: Context, radius: Float) : FrameLayout(context) {
++        var clip = Float.MAX_VALUE
++
++        init {
++            clipToOutline = true
++            outlineProvider =
++                object : ViewOutlineProvider() {
++                    override fun getOutline(view: View, outline: Outline) {
++                        // Corners are sized for the scaled card so they look the same at any size.
++                        val r = radius / view.scaleX.coerceAtLeast(MIN_OUTLINE_SCALE)
++                        outline.setRoundRect(0, 0, view.width, clip.toInt().coerceAtMost(view.height), r)
++                    }
++                }
++        }
++    }
++
++    private class Card(val index: Int, val view: CardView, val title: TextView)
 +
 +    private val context = container.context
 +    private val density = context.resources.displayMetrics.density
 +    private val thumbnailLoader = ThumbnailLoader(context.components.core.thumbnailStorage)
++    private val trayBackground =
++        ContextCompat.getColor(context, ThemeManager.resolveAttribute(materialR.attr.colorSurface, context))
 +
 +    private var overlay: FrameLayout? = null
 +    private var cards = emptyList<Card>()
@@ -637,6 +725,14 @@ index 0000000000..d893cc24e3
 +
 +    val isActive: Boolean
 +        get() = overlay != null
++
++    /** Whether there is a tab on the given side of the current one. */
++    fun hasTab(outcome: Outcome) =
++        when (outcome) {
++            Outcome.PREVIOUS_TAB -> currentIndex > 0
++            Outcome.NEXT_TAB -> currentIndex < tabs.lastIndex
++            else -> true
++        }
 +
 +    fun start() {
 +        cancelAnimation()
@@ -668,54 +764,37 @@ index 0000000000..d893cc24e3
 +        render()
 +    }
 +
-+    /**
-+     * @param velocityX Horizontal finger velocity at release, in pixels per second.
-+     * @param crossedLimit Whether the swipe ended past the [FoundrySwipeLimit]; if not, the page is restored.
-+     */
-+    fun finish(velocityX: Float, crossedLimit: Boolean) {
++    fun finish(outcome: Outcome) {
 +        if (!isActive) return
-+        val projectedPosition = position - velocityX * MOMENTUM_SECONDS / spacing()
-+        val target = projectedPosition.roundToInt().coerceIn(firstCardIndex().toInt(), lastCardIndex().toInt())
-+
++        val target =
++            when (outcome) {
++                Outcome.PREVIOUS_TAB -> currentIndex - 1
++                Outcome.NEXT_TAB -> currentIndex + 1
++                else -> currentIndex
++            }
 +        when {
-+            !crossedLimit -> animateTo(currentIndex.toFloat(), 0f) { removeOverlay() }
-+            target != currentIndex ->
-+                animateTo(target.toFloat(), 0f) {
++            outcome == Outcome.TABS_TRAY -> settleIntoTray()
++            target != currentIndex && target in tabs.indices ->
++                animateTo(fullScreenFrames(target), scrimTo = Color.TRANSPARENT) {
 +                    onSelectTab(tabs[target])
 +                    // Give the newly selected tab a moment to draw before uncovering it.
 +                    container.postDelayed({ fadeOutAndRemove() }, SETTLE_AFTER_SWITCH_MS)
 +                }
-+            else -> {
-+                onShowTabsTray()
-+                fadeOutAndRemove()
-+            }
++            else -> animateTo(fullScreenFrames(currentIndex), scrimTo = Color.TRANSPARENT) { removeOverlay() }
 +        }
 +    }
 +
 +    fun cancel() {
 +        if (!isActive) return
-+        animateTo(currentIndex.toFloat(), 0f) { removeOverlay() }
++        animateTo(fullScreenFrames(currentIndex), scrimTo = Color.TRANSPARENT) { removeOverlay() }
 +    }
 +
 +    private fun buildCard(parent: FrameLayout, index: Int, tab: TabSessionState): Card {
-+        val radius = CARD_CORNER_DP * density
-+        val card =
-+            FrameLayout(context).apply {
-+                clipToOutline = true
-+                outlineProvider =
-+                    object : ViewOutlineProvider() {
-+                        override fun getOutline(view: View, outline: Outline) {
-+                            // Corners are sized for the scaled card so they look the same at any size.
-+                            val scaled = radius / view.scaleX.coerceAtLeast(MIN_SCALE)
-+                            outline.setRoundRect(0, 0, view.width, view.height, scaled)
-+                        }
-+                    }
-+                elevation = CARD_ELEVATION_DP * density
-+            }
++        val card = CardView(context, CARD_CORNER_DP * density).apply { elevation = CARD_ELEVATION_DP * density }
 +        card.addView(FoundryPageSnapshots.placeholder(context), FrameLayout.LayoutParams(MATCH, MATCH))
 +        val image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
 +        card.addView(image, FrameLayout.LayoutParams(MATCH, MATCH))
-+        parent.addView(card, FrameLayout.LayoutParams(container.widthOrScreen(), container.heightOrScreen()))
++        parent.addView(card, FrameLayout.LayoutParams(width(), height()))
 +
 +        val cached = FoundryPageSnapshots.get(tab)
 +        if (cached != null) image.setImageBitmap(cached)
@@ -740,53 +819,143 @@ index 0000000000..d893cc24e3
 +                gravity = Gravity.CENTER
 +                alpha = 0f
 +            }
-+        parent.addView(title, FrameLayout.LayoutParams(container.widthOrScreen(), ViewGroup.LayoutParams.WRAP_CONTENT))
++        parent.addView(title, FrameLayout.LayoutParams(width(), ViewGroup.LayoutParams.WRAP_CONTENT))
 +        return Card(index, card, title)
 +    }
 +
-+    private fun render() {
-+        val root = overlay ?: return
++    /** Where every card is while the finger is down. */
++    private fun dragFrames(): Map<Int, Frame> {
 +        val p = progress()
 +        val scale = scaleFor(p)
-+        val height = container.heightOrScreen().toFloat()
-+        val spacing = spacing(scale)
-+        // Keep the card's bottom (or top, for a top toolbar) edge under the finger.
-+        val edgeOffset = height / 2 * (1 - scale)
-+        val offsetY = if (toolbarAtBottom) edgeOffset - travel else travel - edgeOffset
++        val cardHeight = height() * scale
++        val top =
++            if (toolbarAtBottom) {
++                // The card's bottom edge follows the finger, but the card rises no higher than its tray spot.
++                val free = height() - travel - cardHeight
++                val ceiling = trayCell(currentIndex).top
++                if (free >= ceiling) free else ceiling - (ceiling - free) * OVERSHOOT_RESISTANCE
++            } else {
++                travel.coerceAtMost(height() - cardHeight - EDGE_MARGIN_DP * density)
++            }
++        return cards.associate { card ->
++            val x = width() / 2f + (card.index - position) * spacing(scale)
++            card.index to Frame(x, top, scale, height().toFloat(), 1f)
++        }
++    }
 +
-+        root.setBackgroundColor(Color.argb((SCRIM_ALPHA * (p * SCRIM_RAMP).coerceAtMost(1f)).toInt(), 0, 0, 0))
++    private fun fullScreenFrames(target: Int) =
++        cards.associate { card ->
++            val x = width() / 2f + (card.index - target) * (width() + CARD_GAP_DP * density)
++            card.index to Frame(x, 0f, 1f, height().toFloat(), 1f)
++        }
++
++    private fun settleIntoTray() {
++        val cell = trayCell(currentIndex)
++        val dragged = dragFrames()
++        val frames =
++            cards.associate { card ->
++                val frame = dragged.getValue(card.index)
++                card.index to
++                    if (card.index == currentIndex) {
++                        val scale = cell.width / width()
++                        Frame(cell.left + cell.width / 2, cell.top, scale, cell.height / scale, 1f)
++                    } else {
++                        frame.copy(alpha = 0f)
++                    }
++            }
++        animateTo(frames, scrimTo = trayBackground, duration = TRAY_DURATION_MS) {
++            onShowTabsTray()
++            container.postDelayed({ fadeOutAndRemove() }, SETTLE_AFTER_TRAY_MS)
++        }
++    }
++
++    private class Cell(val left: Float, val top: Float, val width: Float, val height: Float)
++
++    /**
++     * Approximately where the tab at [index] sits in the tabs tray's grid, in the container's coordinates: two
++     * columns (three on wide screens) of 4:5 cards under the tray's header, kept on screen as the tray scrolls.
++     */
++    private fun trayCell(index: Int): Cell {
++        val widthDp = width() / density
++        val columns = if (widthDp >= WIDE_TRAY_DP) WIDE_TRAY_COLUMNS else TRAY_COLUMNS
++        val padding = TRAY_PADDING_DP * density
++        val cellWidth = (width() - padding * 2 - padding * (columns - 1)) / columns
++        val cellHeight = cellWidth / TRAY_CELL_ASPECT
++        val column = index % columns
++        val row = index / columns
++
++        val statusBar =
++            ViewCompat.getRootWindowInsets(container)?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0
++        val location = IntArray(2).also { container.getLocationOnScreen(it) }
++        val gridTop = statusBar + TRAY_HEADER_DP * density - location[1]
++        val lowest = height() - cellHeight - TRAY_BOTTOM_DP * density
++        val top = (gridTop + row * (cellHeight + padding)).coerceAtMost(lowest.coerceAtLeast(gridTop))
++        return Cell(padding + column * (cellWidth + padding), top, cellWidth, cellHeight)
++    }
++
++    private fun render(
++        frames: Map<Int, Frame> = dragFrames(),
++        scrim: Int = dragScrim(),
++        titleAlpha: Float = dragTitleAlpha(),
++    ) {
++        val root = overlay ?: return
++        root.setBackgroundColor(scrim)
 +        for (card in cards) {
-+            val x = (card.index - position) * spacing
-+            card.root.apply {
-+                pivotX = width / 2f
-+                pivotY = height / 2f
-+                scaleX = scale
-+                scaleY = scale
-+                translationX = x
-+                translationY = offsetY
++            val frame = frames[card.index] ?: continue
++            card.view.apply {
++                pivotX = 0f
++                pivotY = 0f
++                scaleX = frame.scale
++                scaleY = frame.scale
++                translationX = frame.centerX - width() * frame.scale / 2
++                translationY = frame.top
++                alpha = frame.alpha
++                clip = frame.clip
 +                invalidateOutline()
 +            }
 +            card.title.apply {
-+                translationX = x
-+                translationY = height / 2 * (1 - scale) + offsetY - this.height - TITLE_GAP_DP * density
-+                this.alpha = (p * 2f - 0.4f).coerceIn(0f, 1f)
++                translationX = frame.centerX - width() / 2f
++                translationY = frame.top - this.height - TITLE_GAP_DP * density
++                alpha = titleAlpha * frame.alpha
 +            }
 +        }
 +    }
 +
-+    private fun animateTo(targetPosition: Float, targetTravel: Float, onEnd: () -> Unit) {
++    private fun dragTitleAlpha() = (progress() * 2f - 0.4f).coerceIn(0f, 1f)
++
++    private fun dragScrim(): Int {
++        val alpha = SCRIM_ALPHA * (progress() * SCRIM_RAMP).coerceAtMost(1f)
++        return Color.argb(alpha.toInt(), 0, 0, 0)
++    }
++
++    private fun animateTo(
++        targets: Map<Int, Frame>,
++        scrimTo: Int,
++        duration: Long = SNAP_DURATION_MS,
++        onEnd: () -> Unit,
++    ) {
 +        cancelAnimation()
-+        val startPosition = position
-+        val startTravel = travel
++        val starts = dragFrames()
++        val scrimFrom = dragScrim()
++        val titleFrom = dragTitleAlpha()
 +        animator =
 +            ValueAnimator.ofFloat(0f, 1f).apply {
-+                duration = SNAP_DURATION_MS
++                this.duration = duration
 +                interpolator = FastOutSlowInInterpolator()
 +                addUpdateListener {
 +                    val f = it.animatedValue as Float
-+                    position = startPosition + (targetPosition - startPosition) * f
-+                    travel = startTravel + (targetTravel - startTravel) * f
-+                    render()
++                    val frames =
++                        targets.mapValues { (index, end) ->
++                            val from = starts[index] ?: end
++                            Frame(
++                                lerp(from.centerX, end.centerX, f),
++                                lerp(from.top, end.top, f),
++                                lerp(from.scale, end.scale, f),
++                                lerp(from.clip, end.clip, f),
++                                lerp(from.alpha, end.alpha, f),
++                            )
++                        }
++                    render(frames, ColorUtils.blendARGB(scrimFrom, scrimTo, f), titleFrom * (1f - f))
 +                }
 +                doOnEnd { onEnd() }
 +                start()
@@ -815,16 +984,18 @@ index 0000000000..d893cc24e3
 +
 +    private fun scaleFor(progress: Float) = 1f - (1f - MIN_SCALE) * progress
 +
-+    private fun spacing(scale: Float = scaleFor(progress())): Float =
-+        container.widthOrScreen() * scale + CARD_GAP_DP * density
++    private fun spacing(scale: Float = scaleFor(progress())): Float = width() * scale + CARD_GAP_DP * density
 +
 +    private fun firstCardIndex() = cards.firstOrNull()?.index?.toFloat() ?: currentIndex.toFloat()
 +
 +    private fun lastCardIndex() = cards.lastOrNull()?.index?.toFloat() ?: currentIndex.toFloat()
 +
-+    private fun View.widthOrScreen() = if (width > 0) width else resources.displayMetrics.widthPixels
++    private fun width() = if (container.width > 0) container.width else context.resources.displayMetrics.widthPixels
 +
-+    private fun View.heightOrScreen() = if (height > 0) height else resources.displayMetrics.heightPixels
++    private fun height() =
++        if (container.height > 0) container.height else context.resources.displayMetrics.heightPixels
++
++    private fun lerp(from: Float, to: Float, f: Float) = from + (to - from) * f
 +
 +    private companion object {
 +        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
@@ -832,8 +1003,9 @@ index 0000000000..d893cc24e3
 +        /** Tabs shown on each side of the current one. */
 +        const val WINDOW = 4
 +
-+        /** Smallest size of a card, as a fraction of the screen. */
++        /** Smallest size of a card while dragging, as a fraction of the screen. */
 +        const val MIN_SCALE = 0.55f
++        const val MIN_OUTLINE_SCALE = 0.3f
 +
 +        /** Upward travel before the card starts to shrink. */
 +        const val DEAD_ZONE_DP = 16f
@@ -841,8 +1013,18 @@ index 0000000000..d893cc24e3
 +        /** Further upward travel over which the card shrinks fully. */
 +        const val FULL_SHRINK_DP = 220f
 +
-+        /** How far ahead the release velocity is projected, as Android's recents does with its fling momentum. */
-+        const val MOMENTUM_SECONDS = 0.15f
++        /** How much a card still moves when dragged past its tray spot. */
++        const val OVERSHOOT_RESISTANCE = 0.08f
++        const val EDGE_MARGIN_DP = 16f
++
++        /** The tabs tray's grid, approximated: see [trayCell]. */
++        const val TRAY_COLUMNS = 2
++        const val WIDE_TRAY_COLUMNS = 3
++        const val WIDE_TRAY_DP = 480f
++        const val TRAY_PADDING_DP = 16f
++        const val TRAY_CELL_ASPECT = 0.8f
++        const val TRAY_HEADER_DP = 88f
++        const val TRAY_BOTTOM_DP = 96f
 +
 +        const val CARD_GAP_DP = 16f
 +        const val CARD_CORNER_DP = 20f
@@ -852,16 +1034,18 @@ index 0000000000..d893cc24e3
 +        const val SCRIM_ALPHA = 230f
 +        const val SCRIM_RAMP = 3f
 +        const val SNAP_DURATION_MS = 260L
++        const val TRAY_DURATION_MS = 320L
 +        const val FADE_DURATION_MS = 180L
 +        const val SETTLE_AFTER_SWITCH_MS = 250L
++        const val SETTLE_AFTER_TRAY_MS = 350L
 +    }
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt
 new file mode 100644
-index 0000000000..3b6e93a9ae
+index 0000000000..04a9149e42
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryToolbarGesturesHandler.kt
-@@ -0,0 +1,340 @@
+@@ -0,0 +1,365 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -984,17 +1168,42 @@ index 0000000000..3b6e93a9ae
 +        val crossed = limit.isCrossed(projectedX, projectedAway)
 +        when (mode) {
 +            Mode.BACK_FORWARD -> finishBackForward(projectedX, crossed)
-+            Mode.TAB_SWITCHER -> tabSwitcher?.finish(velocityX, crossed)
++            Mode.TAB_SWITCHER -> tabSwitcher?.finish(tabOutcome(projectedX, projectedAway))
 +            else -> Unit
 +        }
 +        brows.dismiss()
 +        mode = Mode.UNDECIDED
 +    }
 +
++    /**
++     * Where a tab switcher swipe ending at ([x], [away]) leads: nowhere under the brows; past a brow out to the side,
++     * the tab on that side (the cards follow the finger, so moving right brings in the previous tab); past the middle,
++     * the tabs tray.
++     */
++    private fun tabOutcome(x: Float, away: Float): FoundryTabSwitcher.Outcome {
++        val switcher = tabSwitcher ?: return FoundryTabSwitcher.Outcome.STAY
++        val outcome =
++            when {
++                !limit.isCrossed(x, away) -> FoundryTabSwitcher.Outcome.STAY
++                !limit.isToTheSide(x) -> FoundryTabSwitcher.Outcome.TABS_TRAY
++                x > 0 -> FoundryTabSwitcher.Outcome.PREVIOUS_TAB
++                else -> FoundryTabSwitcher.Outcome.NEXT_TAB
++            }
++        return if (switcher.hasTab(outcome)) outcome else FoundryTabSwitcher.Outcome.STAY
++    }
++
 +    private fun updateBrows() {
++        val away = awayFromEdge()
 +        when (mode) {
-+            Mode.UNDECIDED, Mode.TAB_SWITCHER -> brows.update(dx, awayFromEdge(), canCross = true)
-+            Mode.BACK_FORWARD -> brows.update(dx, awayFromEdge(), canCross = canNavigate())
++            Mode.UNDECIDED -> brows.update(dx, away, FoundryBrowsGuide.Style.UNDECIDED, canCross = true)
++            Mode.BACK_FORWARD -> brows.update(dx, away, FoundryBrowsGuide.Style.BACK_FORWARD, canNavigate())
++            Mode.TAB_SWITCHER ->
++                brows.update(
++                    dx,
++                    away,
++                    FoundryBrowsGuide.Style.TABS,
++                    canCross = tabOutcome(dx, away) != FoundryTabSwitcher.Outcome.STAY,
++                )
 +            Mode.IGNORED -> brows.dismiss(quick = true)
 +        }
 +    }
