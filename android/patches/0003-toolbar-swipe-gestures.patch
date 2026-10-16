@@ -121,10 +121,10 @@ index 2d733a28d4..dd23ba5599 100644
      @OptIn(ExperimentalCoroutinesApi::class)
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryBrowsGuide.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryBrowsGuide.kt
 new file mode 100644
-index 0000000000..a0e729fa62
+index 0000000000..07882d34e3
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundryBrowsGuide.kt
-@@ -0,0 +1,298 @@
+@@ -0,0 +1,326 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -140,6 +140,7 @@ index 0000000000..a0e729fa62
 +import android.graphics.Paint
 +import android.graphics.Path
 +import android.graphics.PointF
++import android.graphics.RectF
 +import android.graphics.Shader
 +import android.view.HapticFeedbackConstants
 +import android.view.View
@@ -149,14 +150,16 @@ index 0000000000..a0e729fa62
 +import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 +import kotlin.math.PI
 +import kotlin.math.abs
++import kotlin.math.cos
 +import kotlin.math.sin
 +
 +/**
 + * Draws [FoundrySwipeLimit] from where a swipe starts, as a pair of shaded eyebrows: a darker brow whose top edge is
 + * the limit, over a lighter shade covering the area under it.
 + *
-+ * Crossing the limit is shown differently for each gesture: going back/forward lights up the brow on that side;
-+ * moving to a neighbouring tab raises the brow on that side; heading up to the tabs tray raises both.
++ * Only the brow on the side the finger is heading reacts. Going back/forward fills it with the brand colour like a
++ * loading bar, from the middle outwards, as far as the finger has travelled towards the limit; moving to a
++ * neighbouring tab lights it up; heading up to the tabs tray lights up both.
 + *
 + * @param awayIsUp Whether "away from the toolbar" is up the screen (bottom toolbar) rather than down.
 + */
@@ -165,7 +168,7 @@ index 0000000000..a0e729fa62
 +    private val limit: FoundrySwipeLimit,
 +    private val awayIsUp: Boolean,
 +) {
-+    /** What the swipe has been recognised as, which decides how crossing the limit is shown. */
++    /** What the swipe has been recognised as, which decides how the brows react. */
 +    enum class Style { UNDECIDED, BACK_FORWARD, TABS }
 +
 +    private val density = activity.resources.displayMetrics.density
@@ -214,18 +217,23 @@ index 0000000000..a0e729fa62
 +            brows.crossed = crossed
 +        }
 +        // Index 0 is the brow on the right of the starting point, 1 the one on the left.
-+        val side = if (dx >= 0f) 0 else 1
++        val active = if (dx >= 0f) 0 else 1
 +        for (i in 0..1) {
-+            brows.lightTarget[i] = if (crossed && style == Style.BACK_FORWARD && i == side) 1f else 0f
-+            brows.raiseTarget[i] =
-+                when {
-+                    !crossed || style != Style.TABS -> 0f
-+                    !limit.isToTheSide(dx) -> 1f
-+                    i == side -> 1f
-+                    else -> 0f
++            val isActive = i == active
++            brows.near[i] = if (isActive) reach.coerceIn(0f, 1f) else 0f
++            brows.fillTarget[i] =
++                when (style) {
++                    Style.UNDECIDED -> 0f
++                    Style.BACK_FORWARD -> if (isActive && canCross) reach.coerceIn(0f, 1f) else 0f
++                    Style.TABS ->
++                        when {
++                            !crossed -> 0f
++                            !limit.isToTheSide(dx) -> 1f
++                            isActive -> 1f
++                            else -> 0f
++                        }
 +                }
 +        }
-+        brows.nearness = reach.coerceIn(0f, 1f)
 +        brows.fade =
 +            if (style == Style.BACK_FORWARD && reach > 1f) {
 +                (1f - (reach - 1f) / FADE_BEYOND).coerceIn(0f, 1f)
@@ -262,19 +270,18 @@ index 0000000000..a0e729fa62
 +    private inner class BrowsView(private val start: PointF) : View(activity) {
 +        var drawn = 0f
 +        var fade = 1f
-+        var nearness = 0f
 +        var crossed = false
-+        val lightTarget = FloatArray(2)
-+        val raiseTarget = FloatArray(2)
-+        private val light = FloatArray(2)
-+        private val raise = FloatArray(2)
++        val near = FloatArray(2)
++        val fillTarget = FloatArray(2)
++        private val fill = FloatArray(2)
 +
-+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
++        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 +        private val soft = Paint(Paint.ANTI_ALIAS_FLAG).apply {
 +            style = Paint.Style.STROKE
 +            strokeJoin = Paint.Join.ROUND
 +        }
 +        private val location = IntArray(2)
++        private val oval = RectF()
 +        private val area = Path()
 +        private val brow = Path()
 +
@@ -286,7 +293,7 @@ index 0000000000..a0e729fa62
 +
 +        override fun onDraw(canvas: Canvas) {
 +            if (fade <= 0f || drawn <= 0f) return
-+            val settling = step(light, lightTarget) or step(raise, raiseTarget)
++            val settling = step()
 +            getLocationOnScreen(location)
 +            val cx = start.x - location[0]
 +            val cy = start.y - location[1]
@@ -294,94 +301,113 @@ index 0000000000..a0e729fa62
 +            canvas.save()
 +            if (!awayIsUp) canvas.scale(1f, -1f, cx, cy)
 +            drawArea(canvas, cx, cy)
-+            for (i in 0..1) drawBrow(canvas, cx, cy, if (i == 0) 1 else -1, i)
++            for (i in 0..1) drawBrow(canvas, cx, cy, i)
 +            canvas.restore()
 +
 +            if (settling) postInvalidateOnAnimation()
 +        }
 +
-+        /** Moves each value part of the way to its target; returns whether any is still moving. */
-+        private fun step(values: FloatArray, targets: FloatArray): Boolean {
++        /** Moves each brow's fill part of the way to its target; returns whether any is still moving. */
++        private fun step(): Boolean {
 +            var moving = false
-+            for (i in values.indices) {
-+                val delta = targets[i] - values[i]
++            for (i in fill.indices) {
++                val delta = fillTarget[i] - fill[i]
 +                if (abs(delta) < SETTLED) {
-+                    values[i] = targets[i]
++                    fill[i] = fillTarget[i]
 +                } else {
-+                    values[i] += delta * EASE
++                    fill[i] += delta * EASE
 +                    moving = true
 +                }
 +            }
 +            return moving
 +        }
 +
++        /** The area under the limit: both brows' circles above the starting point's level. */
 +        private fun drawArea(canvas: Canvas, cx: Float, cy: Float) {
-+            val reach = limit.sideReach
++            val d = limit.eyeOffset
++            val r = limit.eyeRadius
++            val sweep = limit.eyeSweepDegrees
 +            area.reset()
-+            area.moveTo(cx - reach, cy)
-+            for (i in 0..SAMPLES * 2) {
-+                val x = -reach + 2 * reach * i / (SAMPLES * 2)
-+                area.lineTo(cx + x, cy - limit.heightAt(x))
-+            }
-+            area.lineTo(cx + reach, cy)
++            oval.set(cx + d - r, cy - r, cx + d + r, cy + r)
++            area.arcTo(oval, 0f, -sweep, true)
++            oval.set(cx - d - r, cy - r, cx - d + r, cy + r)
++            area.arcTo(oval, 180f + sweep, -sweep)
 +            area.close()
-+            val alpha = fade * drawn * (AREA_ALPHA + AREA_NEAR_BOOST * nearness)
-+            fill.shader =
++
++            val alpha = fade * drawn * (AREA_ALPHA + AREA_NEAR_BOOST * near.max())
++            paint.shader =
 +                LinearGradient(
 +                    0f,
-+                    cy - limit.heightAt(reach / 2),
++                    cy - r,
 +                    0f,
 +                    cy,
 +                    ColorUtils.setAlphaComponent(shade, (alpha * OPAQUE).toInt()),
 +                    Color.TRANSPARENT,
 +                    Shader.TileMode.CLAMP,
 +                )
-+            canvas.drawPath(area, fill)
-+            fill.shader = null
++            canvas.drawPath(area, paint)
++            paint.shader = null
 +        }
 +
-+        /**
-+         * One brow, from its head beside the starting point out to its tail. Its top edge lies on the limit, it is
-+         * thickest at the head, and raising it lifts it and deepens its arch.
-+         */
-+        private fun drawBrow(canvas: Canvas, cx: Float, cy: Float, side: Int, index: Int) {
-+            val from = limit.browStart
-+            val to = from + (limit.sideReach - from) * drawn
-+            val thickness = BROW_DP * density
-+            val lift = RAISE_DP * density * raise[index]
-+            brow.reset()
-+            for (i in 0..SAMPLES) {
-+                val x = from + (to - from) * i / SAMPLES
-+                val u = (x - from) / (limit.sideReach - from)
-+                val y = cy - limit.heightAt(x) - lift * arch(u)
-+                if (i == 0) brow.moveTo(cx + side * x, y) else brow.lineTo(cx + side * x, y)
-+            }
-+            for (i in SAMPLES downTo 0) {
-+                val x = from + (to - from) * i / SAMPLES
-+                val u = (x - from) / (limit.sideReach - from)
-+                val y = cy - limit.heightAt(x) - lift * arch(u) + thickness * taper(u)
-+                brow.lineTo(cx + side * x, y)
-+            }
-+            brow.close()
++        /** One brow in the shade colour, with its lit part (from the middle outwards) over it in the brand colour. */
++        private fun drawBrow(canvas: Canvas, cx: Float, cy: Float, index: Int) {
++            val side = if (index == 0) 1 else -1
++            val strength = fade * (BROW_ALPHA + BROW_NEAR_BOOST * near[index])
 +
-+            val color = ColorUtils.blendARGB(shade, brand, light[index])
-+            val strength = fade * (BROW_ALPHA + BROW_NEAR_BOOST * nearness + LIT_BOOST * light[index])
-+            soft.color = color
++            buildBrow(cx, cy, side, from = 0f, to = drawn)
++            soft.color = shade
 +            for (layer in SHADOW) {
 +                soft.strokeWidth = layer.widthDp * density
 +                soft.alpha = (layer.alpha * strength * OPAQUE).toInt().coerceIn(0, OPAQUE)
 +                canvas.drawPath(brow, soft)
 +            }
-+            fill.color = color
-+            fill.alpha = (strength * OPAQUE).toInt().coerceIn(0, OPAQUE)
-+            canvas.drawPath(brow, fill)
++            paint.color = shade
++            paint.alpha = (strength * OPAQUE).toInt().coerceIn(0, OPAQUE)
++            canvas.drawPath(brow, paint)
++
++            val lit = fill[index]
++            if (lit > 0f) {
++                buildBrow(cx, cy, side, from = 1f - lit, to = 1f)
++                soft.color = brand
++                soft.strokeWidth = GLOW_DP * density
++                soft.alpha = (GLOW_ALPHA * fade * OPAQUE).toInt().coerceIn(0, OPAQUE)
++                canvas.drawPath(brow, soft)
++                paint.color = brand
++                paint.alpha = (LIT_ALPHA * fade * OPAQUE).toInt().coerceIn(0, OPAQUE)
++                canvas.drawPath(brow, paint)
++            }
 +        }
 +
-+        /** How much of the raise each point along the brow gets: some everywhere, most at the arch. */
-+        private fun arch(u: Float) = RAISE_BASE + (1 - RAISE_BASE) * sin(PI * u).toFloat()
++        /**
++         * The part of a brow between [from] and [to], where 0 is its outer tail and 1 is where it meets the other
++         * brow. Its top edge lies on the limit; it is thickest in the middle and tapers to a thin tail.
++         */
++        private fun buildBrow(cx: Float, cy: Float, side: Int, from: Float, to: Float) {
++            brow.reset()
++            if (to <= from) return
++            val d = limit.eyeOffset
++            val r = limit.eyeRadius
++            val sweep = Math.toRadians(limit.eyeSweepDegrees.toDouble())
++            val thickness = BROW_DP * density
++            for (i in 0..SAMPLES) {
++                val u = from + (to - from) * i / SAMPLES
++                val a = sweep * u
++                val x = cx + side * (d + r * cos(a)).toFloat()
++                val y = cy - (r * sin(a)).toFloat()
++                if (i == 0) brow.moveTo(x, y) else brow.lineTo(x, y)
++            }
++            for (i in SAMPLES downTo 0) {
++                val u = from + (to - from) * i / SAMPLES
++                val a = sweep * u
++                val inner = r - thickness * taper(u)
++                brow.lineTo(cx + side * (d + inner * cos(a)).toFloat(), cy - (inner * sin(a)).toFloat())
++            }
++            brow.close()
++        }
 +
-+        /** Brow thickness along its length: a rounded head, thick just after it, thinning to the tail. */
-+        private fun taper(u: Float) = (1 - TAIL_THINNING * u) * (HEAD_ROUNDING + u * HEAD_RAMP).coerceAtMost(1f)
++        private fun taper(u: Float) = (TAIL + (1 - TAIL) * sin(PI * u * PEAK_SPAN)).toFloat()
++
++        private fun FloatArray.max() = maxOf(this[0], this[1])
 +    }
 +
 +    private class Layer(val widthDp: Float, val alpha: Float)
@@ -393,18 +419,20 @@ index 0000000000..a0e729fa62
 +        const val DAY_SHADE = "#1A1D26"
 +        const val NIGHT_SHADE = "#D9DEEE"
 +
-+        const val SAMPLES = 36
-+        const val BROW_DP = 16f
-+        const val TAIL_THINNING = 0.75f
-+        const val HEAD_ROUNDING = 0.45f
-+        const val HEAD_RAMP = 6f
++        const val SAMPLES = 40
++        const val BROW_DP = 18f
 +
-+        const val RAISE_DP = 14f
-+        const val RAISE_BASE = 0.5f
++        /** Brow thickness at the tail, relative to its thickest. */
++        const val TAIL = 0.18
++
++        /** How much of a half sine wave the brow's thickness follows, from tail to inner end. */
++        const val PEAK_SPAN = 0.85
 +
 +        const val BROW_ALPHA = 0.42f
 +        const val BROW_NEAR_BOOST = 0.3f
-+        const val LIT_BOOST = 0.25f
++        const val LIT_ALPHA = 0.9f
++        const val GLOW_DP = 8f
++        const val GLOW_ALPHA = 0.25f
 +        const val AREA_ALPHA = 0.12f
 +        const val AREA_NEAR_BOOST = 0.06f
 +
@@ -414,9 +442,9 @@ index 0000000000..a0e729fa62
 +        /** How far past the limit, relative to it, the brows take to fade away while going back/forward. */
 +        const val FADE_BEYOND = 0.5f
 +
-+        /** Per frame, how much of the remaining way a brow moves when lighting up or raising. */
-+        const val EASE = 0.25f
-+        const val SETTLED = 0.01f
++        /** Per frame, how much of the remaining way a brow's fill moves. */
++        const val EASE = 0.35f
++        const val SETTLED = 0.005f
 +
 +        const val APPEAR_MS = 220L
 +        const val DISMISS_MS = 200L
@@ -546,59 +574,56 @@ index 0000000000..9ebc6eac51
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundrySwipeLimit.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundrySwipeLimit.kt
 new file mode 100644
-index 0000000000..a406fcc40c
+index 0000000000..72c4f58d0b
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/gestures/FoundrySwipeLimit.kt
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,59 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +package org.mozilla.fenix.components.toolbar.gestures
 +
-+import kotlin.math.PI
 +import kotlin.math.abs
-+import kotlin.math.max
-+import kotlin.math.sin
++import kotlin.math.atan2
++import kotlin.math.hypot
++import kotlin.math.sqrt
 +
 +/**
-+ * The line a toolbar swipe has to cross to do anything, shaped like a pair of eyebrows over the starting point.
-+ * Released under it, the swipe does nothing; released past it, it goes back/forward, to the neighbouring tab or to
-+ * the tabs tray. [FoundryBrowsGuide] draws the brows with their top edge on this line, so what is shown is the limit.
++ * The line a toolbar swipe has to cross to do anything: two arcs over the starting point, shaped like a pair of
++ * eyebrows. Released under them, the swipe does nothing; released past them, it goes back/forward, to the
++ * neighbouring tab or to the tabs tray. [FoundryBrowsGuide] draws the brows with their top edge on this line, so what
++ * is shown is the limit.
 + *
-+ * Each brow starts low beside the starting point ([HEAD_DP] up), arches up to [PEAK_DP] and falls to a tail
-+ * [SIDE_REACH_DP] to the side; past the tail, moving that far sideways crosses the limit at any height.
++ * Each brow follows the upper half of a circle beside the starting point; together they reach [SIDE_REACH_DP]
++ * sideways and dip to [UP_REACH_DP] straight up, between the brows.
 + */
 +class FoundrySwipeLimit(private val density: Float) {
-+    /** How far sideways a brow reaches, in pixels. */
-+    val sideReach = SIDE_REACH_DP * density
++    private val side = SIDE_REACH_DP * density
++    private val up = UP_REACH_DP * density
 +
-+    /** Where a brow begins, sideways from the starting point, in pixels. */
-+    val browStart = BROW_GAP_DP * density
++    /** Distance from the starting point to the centre of each brow's circle. */
++    val eyeOffset = (side * side - up * up) / (2 * side)
 +
-+    /** Height of the brow's top edge above the starting point, [x] pixels to either side. */
-+    fun heightAt(x: Float): Float {
-+        val dp = (abs(x) / density).coerceAtMost(SIDE_REACH_DP)
-+        val height =
-+            if (dp <= PEAK_AT_DP) {
-+                HEAD_DP + (PEAK_DP - HEAD_DP) * sin(PI / 2 * dp / PEAK_AT_DP).toFloat()
-+            } else {
-+                val u = (dp - PEAK_AT_DP) / (SIDE_REACH_DP - PEAK_AT_DP)
-+                PEAK_DP - (PEAK_DP - TAIL_DP) * u * u
-+            }
-+        return height * density
-+    }
++    /** Radius of each brow's top edge. */
++    val eyeRadius = side - eyeOffset
++
++    /** Angle, seen from a brow's centre, from its outer tail to where the two brows meet. */
++    val eyeSweepDegrees = (180.0 - Math.toDegrees(atan2(up.toDouble(), eyeOffset.toDouble()))).toFloat()
 +
 +    /**
-+     * How far a point is towards the limit: below 1 is under the brows, 1 or more has crossed.
++     * How far a point is towards the limit along its direction: below 1 is under the brows, 1 or more has crossed.
 +     *
 +     * @param dx Sideways distance from the starting point, in pixels.
 +     * @param away Distance away from the toolbar's screen edge, in pixels.
 +     */
 +    fun reach(dx: Float, away: Float): Float {
-+        val sideways = abs(dx) / sideReach
-+        val up = if (away > 0f) away / heightAt(dx) else 0f
-+        return max(sideways, up)
++        val distance = hypot(dx, away)
++        if (distance == 0f) return 0f
++        val c = abs(dx) / distance
++        val d = eyeOffset
++        val limit = d * c + sqrt(d * d * c * c - d * d + eyeRadius * eyeRadius)
++        return distance / limit
 +    }
 +
 +    fun isCrossed(dx: Float, away: Float) = reach(dx, away) >= 1f
@@ -607,12 +632,8 @@ index 0000000000..a406fcc40c
 +    fun isToTheSide(dx: Float) = abs(dx) >= SIDE_SPLIT_DP * density
 +
 +    private companion object {
-+        const val SIDE_REACH_DP = 172f
-+        const val HEAD_DP = 92f
-+        const val PEAK_DP = 122f
-+        const val PEAK_AT_DP = 118f
-+        const val TAIL_DP = 64f
-+        const val BROW_GAP_DP = 10f
++        const val SIDE_REACH_DP = 176f
++        const val UP_REACH_DP = 94f
 +        const val SIDE_SPLIT_DP = 64f
 +    }
 +}
