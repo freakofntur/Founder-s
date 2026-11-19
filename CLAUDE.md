@@ -180,6 +180,9 @@ in the home folder, with no Homebrew and no sudo:
     because the compile daemon can't connect.
   - The Gradle wrapper's download fails here, so use a local Gradle (`~/dev-tools/bin/gradle`) for non-Firefox
     projects.
+  - `mach` replaces `JAVA_TOOL_OPTIONS`, so the Gradle wrapper inside `mach build` tries IPv4 and times out
+    downloading its Gradle distribution. After a Firefox update that changes the Gradle version, fetch it once by hand:
+    `cd android/firefox && JAVA_HOME=$(ls -d ~/.mozbuild/jdk/jdk-17*/Contents/Home) JAVA_TOOL_OPTIONS=-Djava.net.preferIPv6Addresses=true ./gradlew --version`.
   - The blobless fetch in `fetch.sh` stalls on this network. Use a full shallow fetch instead:
     `git -C android/firefox fetch --depth 1 origin $(cat android/FIREFOX_REVISION) && git -C android/firefox checkout -f FETCH_HEAD`.
     Do this in a fresh `git init` directory. A checkout left over from a blobless fetch keeps `promisor` and

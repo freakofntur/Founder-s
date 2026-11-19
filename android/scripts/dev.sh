@@ -31,9 +31,11 @@ cd "$src"
 export MOZCONFIG="$src/mozconfig"
 export MOZBUILD_STATE_PATH="${MOZBUILD_STATE_PATH:-$HOME/.mozbuild}"
 
-if [ ! -d "$objdir/dist" ]; then
+# A stamp written only after success: a failed first build leaves objdir behind and must run again.
+if [ ! -f "$objdir/.foundry-built" ]; then
   ./mach --no-interactive bootstrap --application-choice mobile_android_artifact_mode
   ./mach build
+  touch "$objdir/.foundry-built"
 fi
 
 if [ "$install" = 1 ]; then
