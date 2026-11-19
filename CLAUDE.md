@@ -23,8 +23,9 @@ The project moved to Gecko because the owner wants Firefox extensions to work. A
   `docs/references/`. Not built yet.
 - **Result priority:** ranking by a small ML model (SLM). Not started.
 - **Built on Gecko:** done.
-- **Scroll on tabs (up and down):** tabs swipe left and right, and each one scrolls up and down. Not built yet. Ask the
-  owner whether this means the service tabs cards or the tab switcher.
+- **Scroll on tabs (up and down):** part of service tabs (confirmed by the owner with the sketch). Each card is a live,
+  interactive page: up and down scrolls the page, and left and right swipes between the cards in that row. Sideways
+  swipes must reach the cards even when the page under the finger could scroll sideways itself.
 - **Floating address bar (laptop only):** a right-click or double-click anywhere on a page opens the usual menu with an
   empty URL box above it, which always opens a new tab. This is for the desktop prototype, not Android.
 
