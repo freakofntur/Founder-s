@@ -23,6 +23,13 @@ The project moved to Gecko because the owner wants Firefox extensions to work. A
   `docs/references/`. Not built yet.
 - **Result priority:** ranking by a small ML model (SLM). Not started.
 - **Built on Gecko:** done.
+- **Scroll on tabs (up and down):** tabs swipe left and right, and each one scrolls up and down. Not built yet. Ask the
+  owner whether this means the service tabs cards or the tab switcher.
+- **Floating address bar (laptop only):** a right-click or double-click anywhere on a page opens the usual menu with an
+  empty URL box above it, which always opens a new tab. This is for the desktop prototype, not Android.
+
+The Notion page's tagline is "Built for builders". Its Feature list database is the owner's source of truth for
+features; read it with the Notion connector (search for "Foundry browser").
 
 Settled decisions: the name is **Foundry**. Service tabs load each service's real web page, with no APIs, so the user's
 existing logins work.
