@@ -346,6 +346,16 @@ Oldest first.
 
 ## Working with the owner
 
+- **Keep Notion in sync with the work, always.** The owner's Notion page "Foundry browser" (use the Notion connector)
+  is the shared vision board. Claude may edit it freely: add, change or remove features, and add screenshots and
+  inspiration. Whenever work happens, update it in the same session so it matches reality:
+  - **Feature list:** set each feature's **Status** (Idea → Next → Building → Testing → Shipped) as work moves. Add new
+    ideas, planned work and future features as rows straight away, even if they are only an idea.
+  - **Feature pages:** describe what was built or planned in plain words, add emulator screenshots of new UI, and list
+    open questions for the owner as checkboxes.
+  - **"Claude's notes" page:** keep the roadmap and decisions current, and add a dated line to the progress log at the
+    end of each session.
+  - When this file's "Where things stand", "Next up" or decision log changes, make the matching change in Notion.
 - The owner tests on an Android phone (a Nothing Phone 2) with dark theme and gesture navigation, and replies with
   screenshots, often drawn on. They don't use GitHub's interface, so always give plain instructions.
   - **In cloud sessions:** give the direct nightly APK link.
