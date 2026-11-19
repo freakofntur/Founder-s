@@ -35,6 +35,14 @@ existing logins work.
   thread during startup, and StrictMode killed the app. The next build fixes this by reading in the background. It
   also contains the fix for the crash on switching to homepage tabs, the current brow rules and the card that follows
   the thumb. The owner's feedback on those is pending.
+- **Direction confirmed by the owner (2026-11-19):**
+  - Keep the Firefox fork, and improve the code: fixing bugs and restructuring files and folders is allowed.
+  - Then build the **service tabs** results screen. This is the first new feature; it will be patch `0007`.
+  - Development now happens locally on the owner's Mac, with an emulator and their phone (see "Local builds on the
+    owner's Mac"). CI stays the source of the nightly APK.
+- **Known bug, not fixed yet:** in `FoundryToolbarGesturesHandler.finishBackForward`, the settle animation's end action
+  calls `removeUnderlay()`. If a new back or forward swipe starts within the 200 ms settle, that removes the *new*
+  swipe's underlay. Fix: remove only the holder that the animation captured, and block new swipes while settling.
 - Open questions for the owner:
   - Tab switching lights the destination's brow (left for the previous tab), to match back/forward. The owner has not
     confirmed this. Flipping it is one line: `destination` in `FoundryBrowsGuide.update`.
@@ -113,6 +121,42 @@ Which files each patch owns. Paths are under `mobile/android/fenix/app/src/main/
   - Ideally, download the APK into an empty directory and grep its `classes*.dex` for a string from the change.
 - The package (`org.mozilla.fenix.debug`) and signing key never change, so a new build installs over the old one with
   no uninstall.
+
+### Local builds on the owner's Mac (Apple Silicon)
+
+The owner also runs Claude Code on their Mac, with the repo at `~/AndroidProjects/Founder-s`. Everything is installed
+in the home folder, with no Homebrew and no sudo:
+
+- **Tools:**
+  - JDK 21: `~/dev-tools/jdk`.
+  - Android SDK: `~/Library/Android/sdk`, with platform-tools, platform 36, build-tools 36, the emulator and an
+    `android-36` `google_apis` arm64 system image.
+  - `gh`: `~/dev-tools/bin/gh`, logged in as `freakofntur`, and set up as git's credential helper.
+  - The paths are exported in `~/.zshrc`.
+- **Network:** the network is IPv6-only (Jio NAT64). The Mac shows `192.0.0.2`, and the phone shows `192.0.0.4`, which
+  can't be reached.
+  - `~/.gradle/gradle.properties` sets `java.net.preferIPv6Addresses=true` and runs the Kotlin compiler in-process,
+    because the compile daemon can't connect.
+  - The Gradle wrapper's download fails here, so use a local Gradle (`~/dev-tools/bin/gradle`) for non-Firefox
+    projects.
+  - The blobless fetch in `fetch.sh` stalls on this network. Use a full shallow fetch instead:
+    `git -C android/firefox fetch --depth 1 origin $(cat android/FIREFOX_REVISION) && git -C android/firefox checkout -f FETCH_HEAD`.
+- **Devices:**
+  - **Emulator:** the AVD is `Pixel` (Pixel 8, API 36). Start it with `~/dev-tools/bin/emu`; it shows up as
+    `emulator-5554`.
+  - **Owner's phone:** a Nothing Phone (2) on wireless adb, because the USB cable is unreliable. Run
+    `~/dev-tools/phone-connect.sh` before every install.
+    - If it reports that the phone isn't connected, stop and ask the owner for the port shown on the phone's Wireless
+      debugging screen, then run `phone-connect.sh <port>`.
+    - The port changes whenever wireless debugging restarts.
+    - The phone's IPv6 address is cached in `~/dev-tools/.phone-ip`.
+  - With two devices attached, pass `adb -s <serial>`.
+- **Build, install and launch:**
+  1. Build: `android/scripts/build.sh`. The APK lands under
+     `android/firefox/objdir-foundry/gradle/build/mobile/android/fenix/app/outputs/apk`.
+  2. Install with `adb -s <serial> install -r <apk>`.
+  3. Launch with `adb -s <serial> shell monkey -p org.mozilla.fenix.debug -c android.intent.category.LAUNCHER 1`.
+- **Crash logs:** read them straight from the device with `adb -s <serial> logcat -d -b crash`.
 
 ### Local builds in a Claude Code cloud sandbox
 
