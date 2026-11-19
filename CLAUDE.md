@@ -326,9 +326,13 @@ Oldest first.
 
 ## Working with the owner
 
-- The owner tests on an Android phone with dark theme and gesture navigation. They download the nightly APK in the
-  phone's browser and reply with screenshots, often drawn on. They don't use a terminal or GitHub's interface, so
-  always give the direct APK link and plain instructions.
+- The owner tests on an Android phone (a Nothing Phone 2) with dark theme and gesture navigation, and replies with
+  screenshots, often drawn on. They don't use GitHub's interface, so always give plain instructions.
+  - **In cloud sessions:** give the direct nightly APK link.
+  - **On the owner's Mac:** install straight onto the emulator or phone (see "Local builds on the owner's Mac"), and
+    send emulator screenshots.
+- Keep replies simple and direct. On the Mac, keep the project memory's `work-log.md` up to date: add a short dated
+  entry after each piece of work.
 - After pushing an Android change:
   - Say what changed in plain words.
   - Once CI finishes, follow up with the link, after checking the asset was updated.
