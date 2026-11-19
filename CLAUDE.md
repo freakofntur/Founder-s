@@ -35,6 +35,27 @@ features; read it with the Notion connector (search for "Foundry browser").
 Settled decisions: the name is **Foundry**. Service tabs load each service's real web page, with no APIs, so the user's
 existing logins work.
 
+## Product thinking (owner's instruction: think like an owner and investor)
+
+Steer the work as someone who owns and is investing in Foundry: be critical, put the core value first, and make changes
+accordingly. Say so plainly when something is a poor use of time. Ask before big direction changes.
+
+- **The bet:** one search, many sources, with the user's own logins in each and no API cost. A neutral place to compare
+  AIs and search side by side, which single-AI browsers (Comet, Arc Search, Opera, Chrome with Gemini) won't be.
+- **Core first:** service tabs is what makes Foundry worth installing. Gesture tuning waits unless something is broken.
+- **Performance budget:** a search must not load every service. Cards load only when landed on; peeking neighbours show
+  a placeholder. Measure memory, data and time-to-first-card on a mid-range phone before adding services.
+- **Release readiness (required before anyone else installs it; not started, needs the owner's go-ahead):**
+  - Turn off or replace Mozilla telemetry (Glean), crash reporting and Mozilla API keys.
+  - Use Foundry's own `applicationId` instead of `org.mozilla.fenix.debug`, and a release signing key.
+  - Check MPL-2.0 and Mozilla trademark obligations, and Firefox Sync and add-on server terms.
+- **Security debt:** the fork is pinned to one Firefox revision. Plan a regular update to new Firefox releases, and keep
+  patches small so updates stay cheap.
+- **Platform risk:** AI sites may rate-limit or bot-check auto-submitted queries (`?q=`). Check on real devices, and
+  fall back to opening the AI with the question for the user to send.
+- **Learning:** ranking ("Result priority") needs signal. Plan opt-in, private, on-device metrics (such as which cards
+  get opened) rather than server telemetry.
+
 ## Where things stand (2026-11-19)
 
 - **All work goes straight to `main`.** No feature branches and no PRs (the owner's rule, 2026-11-19). Commit and push

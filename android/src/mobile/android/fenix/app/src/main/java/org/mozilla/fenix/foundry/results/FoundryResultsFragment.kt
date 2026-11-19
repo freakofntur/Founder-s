@@ -36,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -67,11 +68,13 @@ import org.mozilla.fenix.theme.FirefoxTheme
  * this screen stays on the back stack with every card as it was.
  *
  * Each card's page lives as long as this fragment (not just its view), so coming back from a full-screen card does
- * not reload anything.
+ * not reload anything. A card loads only once it is landed on (the upper row's fully visible cards, the lower row's
+ * front card): peeking neighbours show a placeholder, so a search costs two or three pages, not every service.
  */
 class FoundryResultsFragment : Fragment(), SystemInsetsPaddedFragment {
     private val sessions = mutableMapOf<String, EngineSession>()
     private val currentUrls = mutableMapOf<String, String>()
+    private val loaded = mutableStateListOf<String>()
     private var query by mutableStateOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,8 +95,13 @@ class FoundryResultsFragment : Fragment(), SystemInsetsPaddedFragment {
                 ResultsScreen(
                     query = query,
                     onSubmit = ::submit,
-                    card = { service, modifier ->
+                    card = { service, isLanded, modifier ->
+                        if (isLanded && service.id !in loaded) loaded.add(service.id)
                         ServiceCard(service = service, modifier = modifier, onOpen = { openFullScreen(service) }) {
+                            if (service.id !in loaded) {
+                                CardPlaceholder(service)
+                                return@ServiceCard
+                            }
                             key(service.id) {
                                 AndroidView(
                                     modifier = Modifier.fillMaxSize(),
@@ -169,7 +177,7 @@ private const val LOWER_ROW_WEIGHT = 0.62f
 private fun ResultsScreen(
     query: String,
     onSubmit: (String) -> Unit,
-    card: @Composable (FoundryService, Modifier) -> Unit,
+    card: @Composable (service: FoundryService, isLanded: Boolean, modifier: Modifier) -> Unit,
 ) {
     val upper = remember { FoundryServices.row(FoundryService.Row.UPPER) }
     val lower = remember { FoundryServices.row(FoundryService.Row.LOWER) }
@@ -186,7 +194,11 @@ private fun ResultsScreen(
             beyondViewportPageCount = 1,
             key = { upper[it].id },
         ) { index ->
-            card(upper[index], Modifier.fillMaxSize())
+            val isLanded = upperState.layoutInfo.visiblePagesInfo.any { page ->
+                page.index == index && page.offset >= 0 &&
+                    page.offset + upperState.layoutInfo.pageSize <= upperState.layoutInfo.viewportEndOffset
+            }
+            card(upper[index], isLanded, Modifier.fillMaxSize())
         }
         HorizontalPager(
             state = lowerState,
@@ -196,7 +208,7 @@ private fun ResultsScreen(
             beyondViewportPageCount = 1,
             key = { lower[it].id },
         ) { index ->
-            card(lower[index], Modifier.fillMaxSize())
+            card(lower[index], lowerState.settledPage == index, Modifier.fillMaxSize())
         }
         SearchBar(query = query, onSubmit = onSubmit)
     }
@@ -238,6 +250,25 @@ private fun ServiceCard(
             }
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) { page() }
         }
+    }
+}
+
+/** What a card shows until it is landed on: its badge and name, at no page-load cost. */
+@Composable
+private fun CardPlaceholder(service: FoundryService) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text = service.badge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = service.name, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
