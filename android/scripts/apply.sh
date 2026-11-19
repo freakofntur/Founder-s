@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Applies Foundry's patches (android/patches/*.patch, in name order) to a Firefox checkout, copies the
-# files in android/overlay/ over it (brand images and other whole-file replacements), and installs the
-# build config. Safe to re-run: the checkout is reset first.
+# Applies Foundry's patches (android/patches/*.patch, in name order) to a Firefox checkout, copies
+# Foundry's own source files (android/src/) and the generated brand images (android/overlay/) over it,
+# and installs the build config. Safe to re-run: the checkout is reset first.
 # Usage: android/scripts/apply.sh [firefox-dir]   (default: android/firefox)
 set -euo pipefail
 
@@ -17,6 +17,7 @@ for patch in "$here"/patches/*.patch; do
   git -C "$src" apply --whitespace=nowarn "$patch"
 done
 
+cp -R "$here/src/." "$src/"
 cp -R "$here/overlay/." "$src/"
 cp "$here/mozconfig" "$src/mozconfig"
 echo "Patched $src"
