@@ -1,0 +1,145 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt
+index 93d8d6d7de..61c29f2f61 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt
+@@ -118,6 +118,7 @@ import org.mozilla.fenix.ext.components
+ import org.mozilla.fenix.ext.containsQueryParameters
+ import org.mozilla.fenix.ext.isCustomEngine
+ import org.mozilla.fenix.ext.isKnownSearchDomain
++import org.mozilla.fenix.foundry.FoundryCrashLog
+ import org.mozilla.fenix.home.collections.migration.CollectionsToTabGroupsMigrationWorker
+ import org.mozilla.fenix.home.topsites.TopSitesConfigConstants.TOP_SITES_PROVIDER_LIMIT
+ import org.mozilla.fenix.home.topsites.TopSitesConfigConstants.TOP_SITES_PROVIDER_MAX_THRESHOLD
+@@ -333,6 +334,7 @@ open class FenixApplication : Application(), Provider, ThemeProvider {
+ 
+         // Setup the crash reporter and register the [UncaughtExceptionHandler].
+         setupCrashReporting()
++        FoundryCrashLog.install(this)
+ 
+         // Begin application-services initialization. The megazord contains Nimbus, but not Glean.
+         setupMegazordInitial()
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
+index daf3317dfa..fcf2508a9d 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
+@@ -157,6 +157,7 @@ import org.mozilla.fenix.ext.openSetDefaultBrowserOption
+ import org.mozilla.fenix.ext.recordEventInNimbus
+ import org.mozilla.fenix.ext.setNavigationIcon
+ import org.mozilla.fenix.extension.WebExtensionPromptFeature
++import org.mozilla.fenix.foundry.FoundryCrashLog
+ import org.mozilla.fenix.home.HomeFragment
+ import org.mozilla.fenix.home.TopSitesRefresher
+ import org.mozilla.fenix.home.intent.AssistIntentProcessor
+@@ -225,6 +226,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+ 
+     private var isToolbarInflated = false
+ 
++    /** Whether this activity has already shown the details of a crash from the last run, if there was one. */
++    private var lastCrashChecked = false
++
+     private val webExtensionPopupObserver by lazy {
+         WebExtensionPopupObserver(components.core.store, ::openPopup)
+     }
+@@ -835,6 +839,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+         // https://github.com/mozilla-mobile/android-components/issues/7960
+         breadcrumb(message = "onResume()")
+ 
++        if (!lastCrashChecked) {
++            lastCrashChecked = true
++            FoundryCrashLog.showIfCrashed(this)
++        }
++
+         binding.root.doOnLayout {
+             if (browsingModeManager.mode.isPrivate) {
+                 it.announcePrivateModeForAccessibility()
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/foundry/FoundryCrashLog.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/foundry/FoundryCrashLog.kt
+new file mode 100644
+index 0000000000..5c96ef54c1
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/foundry/FoundryCrashLog.kt
+@@ -0,0 +1,85 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.foundry
++
++import android.app.Activity
++import android.content.ClipData
++import android.content.ClipboardManager
++import android.content.Context
++import android.os.Build
++import android.os.StrictMode
++import android.util.TypedValue
++import android.widget.ScrollView
++import android.widget.TextView
++import android.widget.Toast
++import androidx.appcompat.app.AlertDialog
++import mozilla.components.support.base.log.logger.Logger
++import org.mozilla.fenix.BuildConfig
++import java.io.File
++
++/**
++ * Keeps the details of the last crash, so they can be shown and copied the next time Foundry starts: test builds
++ * otherwise close without any notice.
++ */
++object FoundryCrashLog {
++    private const val FILE_NAME = "foundry-last-crash.txt"
++    private const val TEXT_SP = 11f
++    private const val PADDING_DP = 20
++
++    /** Records uncaught exceptions to a file, then passes them on to the handler that was already installed. */
++    fun install(context: Context) {
++        val file = File(context.filesDir, FILE_NAME)
++        val previous = Thread.getDefaultUncaughtExceptionHandler()
++        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
++            val policy = StrictMode.allowThreadDiskWrites()
++            try {
++                file.writeText(
++                    "Foundry ${BuildConfig.VERSION_NAME} on ${Build.MANUFACTURER} ${Build.MODEL}, " +
++                        "Android ${Build.VERSION.RELEASE}\nThread: ${thread.name}\n\n${throwable.stackTraceToString()}",
++                )
++            } catch (e: java.io.IOException) {
++                Logger.error("Could not record the crash", e)
++            } finally {
++                StrictMode.setThreadPolicy(policy)
++            }
++            previous?.uncaughtException(thread, throwable)
++        }
++    }
++
++    /** If Foundry crashed last time, shows what happened, with a button to copy it. */
++    fun showIfCrashed(activity: Activity) {
++        val file = File(activity.filesDir, FILE_NAME)
++        val policy = StrictMode.allowThreadDiskWrites()
++        val report: String? =
++            try {
++                file.takeIf { it.exists() }?.readText()?.also { file.delete() }
++            } catch (e: java.io.IOException) {
++                Logger.error("Could not read the last crash", e)
++                null
++            } finally {
++                StrictMode.setThreadPolicy(policy)
++            }
++        if (report == null) return
++
++        val padding = (PADDING_DP * activity.resources.displayMetrics.density).toInt()
++        val text =
++            TextView(activity).apply {
++                setText(report)
++                setTextIsSelectable(true)
++                setTextSize(TypedValue.COMPLEX_UNIT_SP, TEXT_SP)
++                setPadding(padding, padding, padding, padding)
++            }
++        AlertDialog.Builder(activity)
++            .setTitle("Foundry closed unexpectedly")
++            .setView(ScrollView(activity).apply { addView(text) })
++            .setPositiveButton("Copy") { _, _ ->
++                val clipboard = activity.getSystemService(ClipboardManager::class.java)
++                clipboard?.setPrimaryClip(ClipData.newPlainText("Foundry crash", report))
++                Toast.makeText(activity, "Copied", Toast.LENGTH_SHORT).show()
++            }
++            .setNegativeButton("Close", null)
++            .show()
++    }
++}
