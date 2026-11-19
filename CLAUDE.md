@@ -31,9 +31,10 @@ existing logins work.
 
 - All work is on branch `claude/browser-search-engine-skeleton-j5ayor`. `main` only has the initial Electron commit, and
   no PR is open.
-- The latest Android build is commit `efb44fa` (CI green). It contains the fix for the crash on switching to homepage
-  tabs, the crash recorder, the current brow rules and the card that follows the thumb. The owner's feedback on it is
-  pending.
+- Build `efb44fa` crashed on every launch ("Foundry needs to restart"): the crash recorder read its file on the main
+  thread during startup, and StrictMode killed the app. The next build fixes this by reading in the background. It
+  also contains the fix for the crash on switching to homepage tabs, the current brow rules and the card that follows
+  the thumb. The owner's feedback on those is pending.
 - Open questions for the owner:
   - Tab switching lights the destination's brow (left for the previous tab), to match back/forward. The owner has not
     confirmed this. Flipping it is one line: `destination` in `FoundryBrowsGuide.update`.
@@ -270,7 +271,9 @@ Oldest first.
   once.
 - Capturing a hidden or zero-size GeckoView can fail. Only capture views that are attached, shown and have a size.
 - Debug builds run StrictMode with "penalty death" until the first fragment resumes, so main-thread disk I/O during
-  startup kills the app. Wrap it in `StrictMode.allowThreadDiskWrites()` or `components.strictMode.allowViolation`.
+  startup kills the app ("Foundry needs to restart" on every launch). Even `context.filesDir` counts: it checks that
+  the directory exists. Do the I/O on `Dispatchers.IO`, or wrap it in `StrictMode.allowThreadDiskWrites()` or
+  `components.strictMode.allowViolation`. This covers `HomeActivity.onCreate`/`onResume` and `FenixApplication`.
 - `Animator.cancel()` also runs `doOnEnd` callbacks, so guard end actions.
 - A new debug key on every CI run made phones reject updates with "package appears to be invalid". The committed
   keystore fixed this.
