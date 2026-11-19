@@ -95,6 +95,7 @@ Which Firefox files each patch edits, and which of Foundry's own files in `andro
 | 0004 foundry-name-and-logo | `res/values/strings.xml`, `res/values/styles.xml`, `res/values-night/styles.xml`, `res/values-night-v27/styles.xml` | English strings say Foundry instead of Firefox, except Mozilla-service, legal, sync and privacy strings; logo and wordmark attributes |
 | 0005 taller-address-bar | android-components `compose/browser-toolbar/.../ui/FullDisplayToolbar.kt` and `BrowserEditToolbar.kt`; `res/values/dimens.xml` | 84 dp toolbar with a 60 dp pill |
 | 0006 foundry-crash-log | `java/.../FenixApplication.kt`, `java/.../HomeActivity.kt` (own file: `java/.../foundry/FoundryCrashLog.kt`) | Records crashes and shows them with a Copy button on next launch |
+| 0007 service-tabs | `res/navigation/nav_graph.xml`, `java/.../search/BrowserToolbarSearchMiddleware.kt`, `java/.../search/FenixSearchMiddleware.kt` (own files: `java/.../foundry/results/*`) | Searches open the Results screen (service tabs) |
 
 ### Making a change
 
@@ -171,7 +172,13 @@ in the home folder, with no Homebrew and no sudo:
     - The port changes whenever wireless debugging restarts.
     - The phone's IPv6 address is cached in `~/dev-tools/.phone-ip`.
   - With two devices attached, pass `adb -s <serial>`.
-- **Build, install and launch:**
+- **Fast loop (use this):** `android/scripts/dev.sh`. It syncs `android/src/` with checksums, so unchanged files keep
+  their timestamps, and re-applies patches only when one changed. It runs bootstrap and `mach build` only the first
+  time, then `./mach gradle fenix:installDebug` onto every connected device and launches Foundry. Pass `--no-install`
+  to only build.
+- **Gradle memory:** `~/.gradle/gradle.properties` overrides the project's settings, so it must keep Firefox's
+  `-Xmx7g` heap. A 3 GB heap there made the Foundry build crawl.
+- **Full build, install and launch** (slow; the same steps as CI):
   1. Build: `android/scripts/build.sh`. The APK lands under
      `android/firefox/objdir-foundry/gradle/build/mobile/android/fenix/app/outputs/apk`.
   2. Install with `adb -s <serial> install -r <apk>`.

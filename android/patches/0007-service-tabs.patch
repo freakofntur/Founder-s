@@ -1,0 +1,61 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/search/BrowserToolbarSearchMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/search/BrowserToolbarSearchMiddleware.kt
+index f6320dbf55..85c999a04c 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/search/BrowserToolbarSearchMiddleware.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/search/BrowserToolbarSearchMiddleware.kt
+@@ -101,6 +101,7 @@ import org.mozilla.fenix.components.search.HISTORY_SEARCH_ENGINE_ID
+ import org.mozilla.fenix.components.search.TABS_SEARCH_ENGINE_ID
+ import org.mozilla.fenix.ext.isGoogleSearchEngine
+ import org.mozilla.fenix.ext.toolbarHintRes
++import org.mozilla.fenix.foundry.results.FoundryResults
+ import org.mozilla.fenix.search.EditPageEndActionsInteractions.ClearSearchClicked
+ import org.mozilla.fenix.search.EditPageEndActionsInteractions.LensButtonClicked
+ import org.mozilla.fenix.search.EditPageEndActionsInteractions.QrScannerClicked
+@@ -332,6 +333,10 @@ class BrowserToolbarSearchMiddleware(
+         }
+ 
+     private fun openSearchOrUrl(text: String, navController: NavController) {
++        if (FoundryResults.openIfSearch(navController, text, browsingModeManager.mode.isPrivate)) {
++            browserStore.dispatch(EngagementFinished(abandoned = false))
++            return
++        }
+         val searchEngine = reconcileSelectedEngine()
+         val isDefaultEngine =
+             (searchEngine?.id ==
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/search/FenixSearchMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/search/FenixSearchMiddleware.kt
+index 59a5f9f5e6..02b26ff720 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/search/FenixSearchMiddleware.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/search/FenixSearchMiddleware.kt
+@@ -64,6 +64,7 @@ import org.mozilla.fenix.components.usecases.ShareUseCases
+ import org.mozilla.fenix.ext.components
+ import org.mozilla.fenix.ext.nav
+ import org.mozilla.fenix.ext.telemetryName
++import org.mozilla.fenix.foundry.results.FoundryResults
+ import org.mozilla.fenix.search.SearchFragmentAction.CopyCurrentWebsiteDetailsClicked
+ import org.mozilla.fenix.search.SearchFragmentAction.EditCurrentWebsiteDetailsClicked
+ import org.mozilla.fenix.search.SearchFragmentAction.Init
+@@ -369,6 +370,10 @@ class FenixSearchMiddleware(
+                 searchEngine: SearchEngine?,
+                 parentSessionId: String?,
+             ) {
++                if (FoundryResults.openIfSearch(navController, searchTerms, browsingModeManager.mode.isPrivate)) {
++                    browserStore.dispatch(AwesomeBarAction.EngagementFinished(abandoned = false))
++                    return
++                }
+                 val searchEngine = store.state.searchEngineSource.searchEngine
+ 
+                 openToBrowserAndLoad(
+diff --git a/mobile/android/fenix/app/src/main/res/navigation/nav_graph.xml b/mobile/android/fenix/app/src/main/res/navigation/nav_graph.xml
+index 2a74ab01ff..c139d2d4c4 100644
+--- a/mobile/android/fenix/app/src/main/res/navigation/nav_graph.xml
++++ b/mobile/android/fenix/app/src/main/res/navigation/nav_graph.xml
+@@ -482,6 +482,10 @@
+         android:name="org.mozilla.fenix.downloads.listscreen.DownloadFragment"
+         android:label="Downloads" />
+ 
++    <fragment
++        android:id="@+id/foundryResultsFragment"
++        android:name="org.mozilla.fenix.foundry.results.FoundryResultsFragment" />
++
+     <fragment
+         android:id="@+id/webCompatReporterFragment"
+         android:name="org.mozilla.fenix.webcompat.ui.WebCompatReporterFragment"
