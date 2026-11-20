@@ -189,7 +189,9 @@ in the home folder, with no Homebrew and no sudo:
     `partialclonefilter` in its config, and goes on fetching blob by blob.
 - **Devices:**
   - **Emulator:** the AVD is `Pixel` (Pixel 8, API 36). Start it with `~/dev-tools/bin/emu`; it shows up as
-    `emulator-5554`.
+    `emulator-5554`. Use `-gpu swiftshader_indirect`: with `-gpu host`, Gecko's web content draws black. Launch
+    Foundry with `am start -n org.mozilla.fenix.debug/org.mozilla.fenix.HomeActivity`; `monkey` can pick the debug
+    build's LeakCanary launcher instead.
   - **Owner's phone:** a Nothing Phone (2) on wireless adb, because the USB cable is unreliable. Run
     `~/dev-tools/phone-connect.sh` before every install.
     - If it reports that the phone isn't connected, stop and ask the owner for the port shown on the phone's Wireless
