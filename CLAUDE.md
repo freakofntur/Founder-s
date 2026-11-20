@@ -351,7 +351,11 @@ Spec: `docs/design/service-tabs.md`, "Results as a tab group". Code: `java/.../f
   sources: the rows open on U0/L0.
 - **Rows:** two `HorizontalPager`s with `userScrollEnabled = false`; `FoundryRowDrag` moves them one window per swipe.
   Sideways drags are taken by `Modifier.sidewaysSwipes` on Compose parts and by `SidewaysSwipeFrame` around each page.
-- **Open** releases every page view first, selects the tab and goes to the browser (a Page).
+- **Panel over Overview (owner, 2026-11-20):** `FoundryGroupViewFragment` is a `<dialog>` destination (patch 0007's
+  nav graph). `FoundryResults.showGroup` opens Overview first if needed, then the panel on top. A full-screen
+  see-through dialog draws a dim scrim (tap = close) around a rounded panel; no header.
+- **Open** releases every page view first, selects the tab and goes to the browser (a Page). Navigating to the browser
+  closes the dialog, so Back from the Page returns to Overview with the group highlighted.
 
 ## Decision log (confirmed by the owner; don't regress)
 
@@ -396,7 +400,9 @@ Oldest first.
 13. **Gestures inside the Group view (2026-11-20):** inside a window the page only scrolls up and down. Left and right
     always move between windows in that row, never scroll the page. Every window in a row must be reachable.
 14. **Group view look (2026-11-20):** like a tab-group view, not a web page: the tray's colours (and dark theme), cards
-    with rounded corners, shadows and spacing, and a group header with the query and the way back to Overview.
+    with rounded corners, shadows and spacing.
+15. **Group view is a panel over Overview (2026-11-20),** like Chrome's tab groups: Overview stays visible, dimmed,
+    around it; tapping outside closes it. No group header (it wasted space).
 
 ## Lessons (bugs we have hit)
 

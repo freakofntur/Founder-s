@@ -15,7 +15,7 @@ the best options side by side instead of one list.
 | Name | What it is |
 |---|---|
 | **Overview** | All tabs and groups, zoomed out (Fenix's tabs tray). Search groups show here like any group. |
-| **Group view** | One group opened: for a search, the U and L rows below. |
+| **Group view** | One group opened, as a panel over a dimmed Overview (like Chrome's tab groups); tap outside it to close. For a search: the U and L rows below. No header. |
 | **Page** | One tab full screen (the normal browser screen), reached with a window's **Open** button. |
 
 ### Where Results lives: the tab view
@@ -83,7 +83,7 @@ logins work.
 - **Scroll up and down inside a window** to scroll that page without leaving the Group view.
 - **Open** on a window shows that tab as a Page. The group keeps its other windows as they were; Overview (or Back)
   returns to it.
-- **‹ Overview** in the group header goes to Overview.
+- **Tap outside the panel** (on the dimmed Overview) or press Back to close the Group view.
 - **The search box** at the bottom starts a new search group (tapping it selects the old query, so typing replaces it).
 - **The follow-up box in an AI window** sends the message to that AI only.
 
@@ -94,7 +94,8 @@ logins work.
 - Google AI Mode loads in L0 in the background. Foundry's built-in extension reads the answer's cited sources (Google
   keeps them as data next to each citation chip, not as links) and sends them to the app in citation order. On the
   emulator the sources arrive 15 to 25 seconds after the search; with none after 45 s, the rows open on U0 and L0.
-- Screenshots: [light](../references/group-view-light.png), [dark](../references/group-view-dark.png),
+- Screenshots: [panel over Overview](../references/group-view-panel.png),
+  [after tapping outside](../references/group-view-panel-closed.png), [light](../references/group-view-light.png), [dark](../references/group-view-dark.png),
   [more sources](../references/group-view-more-sources.png), [Claude ask window](../references/group-view-claude-ask.png),
   [Overview with search groups](../references/overview-with-search-groups.png),
   [Overview's groups page](../references/overview-groups-page.png).

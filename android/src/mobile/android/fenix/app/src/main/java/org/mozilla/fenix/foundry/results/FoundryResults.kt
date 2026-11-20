@@ -11,9 +11,9 @@ import mozilla.components.support.ktx.kotlin.isUrl
 import org.mozilla.fenix.R
 
 /**
- * Entry points for Foundry's search results: a search typed in the address bar becomes a search group shown in the
- * Group view ([FoundryGroupViewFragment]) instead of a single search engine page, and Overview (the tabs view) opens
- * search groups there too.
+ * Entry points for Foundry's search results: a search typed in the address bar becomes a search group, shown in the
+ * Group view ([FoundryGroupViewFragment], a panel over Overview) instead of a single search engine page. Tapping a
+ * search group in Overview (the tabs view) opens it there too.
  */
 object FoundryResults {
     const val ARG_GROUP_ID = "groupId"
@@ -27,12 +27,7 @@ object FoundryResults {
     fun openIfSearch(navController: NavController, text: String, private: Boolean): Boolean {
         val query = text.trim()
         if (private || query.isEmpty() || query.isUrl()) return false
-        val groupId = FoundrySearchGroups.start(navController.context, query)
-        navController.navigate(
-            R.id.foundryGroupViewFragment,
-            Bundle().apply { putString(ARG_GROUP_ID, groupId) },
-            NavOptions.Builder().setPopUpTo(R.id.homeFragment, false).build(),
-        )
+        showGroup(navController, FoundrySearchGroups.start(navController.context, query))
         return true
     }
 
@@ -43,11 +38,24 @@ object FoundryResults {
      */
     fun openGroup(navController: NavController, groupId: String): Boolean {
         if (!FoundrySearchGroups.isSearchGroup(navController.context, groupId)) return false
+        showGroup(navController, groupId)
+        return true
+    }
+
+    /** Shows the Group view as a panel over Overview, opening Overview under it first if it isn't open. */
+    private fun showGroup(navController: NavController, groupId: String) {
+        val overviewOpen = runCatching { navController.getBackStackEntry(R.id.tabManagementFragment) }.isSuccess
+        if (!overviewOpen) {
+            navController.navigate(
+                R.id.tabManagementFragment,
+                null,
+                NavOptions.Builder().setPopUpTo(R.id.homeFragment, false).build(),
+            )
+        }
         navController.navigate(
             R.id.foundryGroupViewFragment,
             Bundle().apply { putString(ARG_GROUP_ID, groupId) },
-            NavOptions.Builder().setPopUpTo(R.id.tabManagementFragment, true).build(),
+            NavOptions.Builder().setPopUpTo(R.id.foundryGroupViewFragment, true).build(),
         )
-        return true
     }
 }

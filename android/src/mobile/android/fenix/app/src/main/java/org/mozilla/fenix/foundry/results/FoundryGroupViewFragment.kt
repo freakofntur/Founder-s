@@ -4,12 +4,16 @@
 
 package org.mozilla.fenix.foundry.results
 
+import android.app.Dialog
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -19,13 +23,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.PagerState
@@ -75,7 +83,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.fragment.app.Fragment
+import androidx.core.view.WindowCompat
+import androidx.fragment.app.DialogFragment
 import androidx.fragment.compose.content
 import androidx.navigation.fragment.findNavController
 import kotlin.math.abs
@@ -88,10 +97,8 @@ import mozilla.components.concept.engine.EngineView
 import mozilla.components.lib.state.ext.flow
 import mozilla.components.support.ktx.kotlin.isUrl
 import org.mozilla.fenix.R
-import org.mozilla.fenix.e2e.SystemInsetsPaddedFragment
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.requireComponents
-import org.mozilla.fenix.tabstray.data.TabGroupTheme
 import org.mozilla.fenix.theme.FirefoxTheme
 
 /**
@@ -103,8 +110,11 @@ import org.mozilla.fenix.theme.FirefoxTheme
  * you see first; U0 (Google's results) and L0 (the AI answer) are one swipe back. Every window is a real tab in the
  * group, created the first time the window is shown, so the group shows in Overview and "Open" simply switches to
  * that tab as a Page. The AI windows (Claude, ChatGPT) only ask when you tap Ask.
+ *
+ * Like Chrome's tab groups, the Group view is a panel over Overview: Overview stays visible, dimmed, around it, and
+ * tapping outside the panel (or Back) closes it.
  */
-class FoundryGroupViewFragment : Fragment(), SystemInsetsPaddedFragment {
+class FoundryGroupViewFragment : DialogFragment() {
     private val groupId: String by lazy { arguments?.getString(FoundryResults.ARG_GROUP_ID).orEmpty() }
 
     /**
@@ -116,38 +126,57 @@ class FoundryGroupViewFragment : Fragment(), SystemInsetsPaddedFragment {
     /** The page views on screen, so [openPage] can hand their pages over without removing views mid-frame. */
     private val liveViews = mutableSetOf<EngineView>()
 
+    /** A full-screen, see-through window: [Overlay] draws the dimmed surround and the panel itself. */
+    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog =
+        Dialog(requireContext(), android.R.style.Theme_Translucent_NoTitleBar).apply {
+            window?.apply {
+                setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
+                setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                @Suppress("DEPRECATION")
+                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+                WindowCompat.setDecorFitsSystemWindows(this, false)
+            }
+        }
+
+    override fun onStart() {
+        super.onStart()
+        dialog?.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+    }
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         pagesAllowed = false
         return content {
             FirefoxTheme {
                 val groups by FoundrySearchGroups.groups(requireContext()).collectAsState()
                 val group = groups?.get(groupId)
-                if (group == null) {
-                    if (groups != null) GoneMessage()
-                    return@FirefoxTheme
+                Overlay(onOutside = ::dismiss) {
+                    if (group == null) {
+                        if (groups != null) GoneMessage()
+                        return@Overlay
+                    }
+                    GroupView(
+                        group = group,
+                        onSubmit = ::submit,
+                        window = { slot, window, isShown, modifier ->
+                            WindowCard(
+                                slot = slot,
+                                window = window,
+                                query = group.query,
+                                modifier = modifier,
+                                onOpen = { tabId -> openPage(tabId) },
+                                onAsk = { w -> FoundrySearchGroups.ensureTab(requireContext(), groupId, w) },
+                            ) { w ->
+                                WindowPage(
+                                    groupId = groupId,
+                                    window = w,
+                                    show = isShown && pagesAllowed,
+                                    liveViews = liveViews,
+                                )
+                            }
+                        },
+                    )
                 }
-                GroupView(
-                    group = group,
-                    onOverview = { findNavController().navigate(R.id.tabManagementFragment) },
-                    onSubmit = ::submit,
-                    window = { slot, window, isShown, modifier ->
-                        WindowCard(
-                            slot = slot,
-                            window = window,
-                            query = group.query,
-                            modifier = modifier,
-                            onOpen = { tabId -> openPage(tabId) },
-                            onAsk = { w -> FoundrySearchGroups.ensureTab(requireContext(), groupId, w) },
-                        ) { w ->
-                            WindowPage(
-                                groupId = groupId,
-                                window = w,
-                                show = isShown && pagesAllowed,
-                                liveViews = liveViews,
-                            )
-                        }
-                    },
-                )
             }
         }
     }
@@ -192,14 +221,13 @@ private const val MAX_LOWER_HEIGHT_FRACTION = 0.42f
 /** Height over width of a lower-row window: landscape, close to a video's shape. */
 private const val LOWER_ASPECT = 0.75f
 
-private val SIDE_PADDING = 16.dp
-private val GAP = 12.dp
+private val SIDE_PADDING = 10.dp
+private val GAP = 10.dp
 private val CARD_SHAPE = RoundedCornerShape(16.dp)
 
 @Composable
 private fun GroupView(
     group: FoundrySearchGroup,
-    onOverview: () -> Unit,
     onSubmit: (String) -> Unit,
     window: @Composable (slot: String, window: FoundryWindow?, isShown: Boolean, modifier: Modifier) -> Unit,
 ) {
@@ -215,8 +243,7 @@ private fun GroupView(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainer)) {
-        Header(query = group.query, windows = rows.upper.size + rows.lower.size, onOverview = onOverview)
+    Column(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth().weight(1f)) {
             val upperWidth = (maxWidth - SIDE_PADDING * 2 - GAP) / 2
             val lowerHeight = minOf((maxWidth - SIDE_PADDING * 2) * LOWER_ASPECT, maxHeight * MAX_LOWER_HEIGHT_FRACTION)
@@ -307,36 +334,44 @@ private fun Modifier.sidewaysSwipes(rowDrag: FoundryRowDrag): Modifier =
         }
     }
 
-/** The group's header, like an open group in the tabs view: its colour, name and size, and the way back to Overview. */
+/**
+ * The Group view's frame: Overview shows through, dimmed, around a panel. Tapping the dimmed part calls [onOutside].
+ */
 @Composable
-private fun Header(query: String, windows: Int, onOverview: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp, end = SIDE_PADDING),
-        verticalAlignment = Alignment.CenterVertically,
+private fun Overlay(onOutside: () -> Unit, panel: @Composable () -> Unit) {
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(SCRIM)
+                .clickable(interactionSource = null, indication = null, onClick = onOutside)
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .imePadding()
+                .padding(start = PANEL_MARGIN, end = PANEL_MARGIN, top = PANEL_TOP_MARGIN, bottom = PANEL_MARGIN),
     ) {
-        TextButton(onClick = onOverview, contentPadding = PaddingValues(horizontal = 12.dp)) {
-            Text(text = "‹ Overview", style = MaterialTheme.typography.labelLarge)
-        }
-        Spacer(modifier = Modifier.width(4.dp))
-        Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(TabGroupTheme.Blue.primary))
-        Spacer(modifier = Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = query,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "Search group · $windows windows",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
+        Surface(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    // Taps inside the panel that nothing else takes must not close it.
+                    .clickable(interactionSource = null, indication = null, onClick = {}),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            shadowElevation = 8.dp,
+        ) {
+            Box(modifier = Modifier.padding(top = 8.dp)) { panel() }
         }
     }
 }
+
+/** How much of Overview shows around the Group view's panel: enough to see it and tap it, little enough to keep room. */
+private val PANEL_MARGIN = 12.dp
+
+/** The dimmed strip above the panel, the easiest place to tap to close it. */
+private val PANEL_TOP_MARGIN = 40.dp
+
+/** Dims Overview behind the panel. */
+private val SCRIM = Color(0x99000000)
 
 /** A window's frame: its slot name, what it holds and an Open button, around its page (or ask card). */
 @Composable
@@ -490,7 +525,7 @@ private fun Placeholder(window: FoundryWindow?, text: String) {
 @Composable
 private fun GoneMessage() {
     Box(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainer),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Text(text = "This search group was closed.", color = MaterialTheme.colorScheme.onSurfaceVariant)
