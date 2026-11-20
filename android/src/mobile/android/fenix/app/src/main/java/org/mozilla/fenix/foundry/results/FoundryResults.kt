@@ -4,7 +4,7 @@
 
 package org.mozilla.fenix.foundry.results
 
-import androidx.core.os.bundleOf
+import android.os.Bundle
 import androidx.navigation.NavController
 import androidx.navigation.NavOptions
 import mozilla.components.support.ktx.kotlin.isUrl
@@ -27,7 +27,7 @@ object FoundryResults {
         if (private || query.isEmpty() || query.isUrl()) return false
         navController.navigate(
             R.id.foundryResultsFragment,
-            bundleOf(ARG_QUERY to query),
+            Bundle().apply { putString(ARG_QUERY, query) },
             NavOptions.Builder().setPopUpTo(R.id.homeFragment, false).build(),
         )
         return true
