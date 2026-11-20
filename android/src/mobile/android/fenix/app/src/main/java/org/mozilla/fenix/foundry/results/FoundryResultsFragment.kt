@@ -11,10 +11,12 @@ import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,7 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PageSize
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,6 +37,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
@@ -47,7 +51,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.Fragment
@@ -62,14 +65,15 @@ import org.mozilla.fenix.ext.requireComponents
 import org.mozilla.fenix.theme.FirefoxTheme
 
 /**
- * Foundry's Results screen: one search shown by several services at once, as live pages in two independent rows.
- * The upper row holds small preview cards (videos, web results, images); the lower row holds large AI chat cards
- * whose neighbours peek in at the edges. Tapping a card's Open button opens its current page as a normal tab, and
+ * Foundry's Results screen: one search shown by several services at once, as live pages ranked by [FoundryPriority],
+ * like a tab group made for the query. Each page holds three cards: priority 1 in the big square at the bottom, 2 and
+ * 3 as tall cards above it (left, then right). Swiping left turns one page at a time to the next three, and the next
+ * page peeks in at the right edge. Tapping a card's Open button opens its current page as a normal tab, and
  * this screen stays on the back stack with every card as it was.
  *
  * Each card's page lives as long as this fragment (not just its view), so coming back from a full-screen card does
- * not reload anything. A card loads only once it is landed on (the upper row's fully visible cards, the lower row's
- * front card): peeking neighbours show a placeholder, so a search costs two or three pages, not every service.
+ * not reload anything. A card loads only once its page is landed on: the peeking page shows placeholders, so a search
+ * costs three pages, not every service.
  */
 class FoundryResultsFragment : Fragment(), SystemInsetsPaddedFragment {
     private val sessions = mutableMapOf<String, EngineSession>()
@@ -95,9 +99,14 @@ class FoundryResultsFragment : Fragment(), SystemInsetsPaddedFragment {
                 ResultsScreen(
                     query = query,
                     onSubmit = ::submit,
-                    card = { service, isLanded, modifier ->
+                    card = { service, priority, isLanded, modifier ->
                         if (isLanded && service.id !in loaded) loaded.add(service.id)
-                        ServiceCard(service = service, modifier = modifier, onOpen = { openFullScreen(service) }) {
+                        ServiceCard(
+                            service = service,
+                            priority = priority,
+                            modifier = modifier,
+                            onOpen = { openFullScreen(service) },
+                        ) {
                             if (service.id !in loaded) {
                                 CardPlaceholder(service)
                                 return@ServiceCard
@@ -170,52 +179,66 @@ class FoundryResultsFragment : Fragment(), SystemInsetsPaddedFragment {
 private val CARD_LOAD_FLAGS =
     EngineSession.LoadUrlFlags.select(EngineSession.LoadUrlFlags.LOAD_FLAGS_BYPASS_LOAD_URI_DELEGATE)
 
-/** Upper-row cards take a little under half the width, so the next card is visibly cut off at the edge. */
-private object UpperCardSize : PageSize {
-    override fun Density.calculateMainAxisPageSize(availableSpace: Int, pageSpacing: Int): Int =
-        ((availableSpace - pageSpacing) * UPPER_CARD_FRACTION).toInt()
-}
+/** Cards per page: priority 1 in the big square at the bottom, 2 and 3 side by side above it. */
+private const val CARDS_PER_PAGE = 3
 
-private const val UPPER_CARD_FRACTION = 0.46f
-private const val UPPER_ROW_WEIGHT = 0.38f
-private const val LOWER_ROW_WEIGHT = 0.62f
+/** How far a drag must go, as a share of the page width, before releasing it turns the page. */
+private const val PAGE_TURN_THRESHOLD = 0.5f
+
+/** The bottom card is square, but never taller than this share of the height (so landscape keeps an upper row). */
+private const val MAX_SQUARE_HEIGHT_FRACTION = 0.6f
 
 @Composable
 private fun ResultsScreen(
     query: String,
     onSubmit: (String) -> Unit,
-    card: @Composable (service: FoundryService, isLanded: Boolean, modifier: Modifier) -> Unit,
+    card: @Composable (service: FoundryService, priority: Int, isLanded: Boolean, modifier: Modifier) -> Unit,
 ) {
-    val upper = remember { FoundryServices.row(FoundryService.Row.UPPER) }
-    val lower = remember { FoundryServices.row(FoundryService.Row.LOWER) }
-    val upperState = rememberPagerState { upper.size }
-    val lowerState = rememberPagerState { lower.size }
+    val ranked = remember(query) { FoundryPriority.rank(query) }
+    val pageCount = (ranked.size + CARDS_PER_PAGE - 1) / CARDS_PER_PAGE
+    val pagerState = rememberPagerState { pageCount }
+    LaunchedEffect(query) { pagerState.scrollToPage(0) }
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         HorizontalPager(
-            state = upperState,
-            modifier = Modifier.fillMaxWidth().weight(UPPER_ROW_WEIGHT),
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
-            pageSize = UpperCardSize,
+            state = pagerState,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentPadding = PaddingValues(start = 12.dp, end = 28.dp, top = 8.dp),
             pageSpacing = 8.dp,
             beyondViewportPageCount = 1,
-            key = { upper[it].id },
-        ) { index ->
-            val isLanded = upperState.layoutInfo.visiblePagesInfo.any { page ->
-                page.index == index && page.offset >= 0 &&
-                    page.offset + upperState.layoutInfo.pageSize <= upperState.layoutInfo.viewportEndOffset
+            flingBehavior =
+                PagerDefaults.flingBehavior(
+                    state = pagerState,
+                    pagerSnapDistance = PagerSnapDistance.atMost(1),
+                    snapPositionalThreshold = PAGE_TURN_THRESHOLD,
+                ),
+        ) { page ->
+            val isLanded = pagerState.settledPage == page
+            val first = page * CARDS_PER_PAGE
+
+            @Composable
+            fun slot(offset: Int, modifier: Modifier) {
+                val service = ranked.getOrNull(first + offset)
+                if (service == null) {
+                    Spacer(modifier = modifier)
+                } else {
+                    card(service, first + offset + 1, isLanded, modifier)
+                }
             }
-            card(upper[index], isLanded, Modifier.fillMaxSize())
-        }
-        HorizontalPager(
-            state = lowerState,
-            modifier = Modifier.fillMaxWidth().weight(LOWER_ROW_WEIGHT),
-            contentPadding = PaddingValues(start = 28.dp, end = 28.dp, top = 4.dp, bottom = 8.dp),
-            pageSpacing = 8.dp,
-            beyondViewportPageCount = 1,
-            key = { lower[it].id },
-        ) { index ->
-            card(lower[index], lowerState.settledPage == index, Modifier.fillMaxSize())
+
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val square = minOf(maxWidth, maxHeight * MAX_SQUARE_HEIGHT_FRACTION)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        slot(1, Modifier.weight(1f).fillMaxHeight())
+                        slot(2, Modifier.weight(1f).fillMaxHeight())
+                    }
+                    slot(0, Modifier.fillMaxWidth().height(square))
+                }
+            }
         }
         SearchBar(query = query, onSubmit = onSubmit)
     }
@@ -224,6 +247,7 @@ private fun ResultsScreen(
 @Composable
 private fun ServiceCard(
     service: FoundryService,
+    priority: Int,
     modifier: Modifier,
     onOpen: () -> Unit,
     page: @Composable () -> Unit,
@@ -247,13 +271,15 @@ private fun ServiceCard(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = service.name,
+                    text = "$priority · ${service.name}",
                     modifier = Modifier.weight(1f),
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                TextButton(onClick = onOpen) { Text(text = "Open") }
+                TextButton(onClick = onOpen, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text(text = "Open")
+                }
             }
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) { page() }
         }

@@ -19,12 +19,12 @@ The project moved to Gecko because the owner wants Firefox extensions to work. A
 
 - **Bottom UI on mobile:** major controls within thumb reach, swipe gestures. Done: bottom toolbar and the gesture
   system below.
-- **Multiple results for a search ("service tabs"):** spec in `docs/design/service-tabs.md` with a sketch in
-  `docs/references/`. Not built yet.
+- **Multiple results for a search ("service tabs"):** spec in `docs/design/service-tabs.md`. Built: pages of three
+  live cards ranked by priority (1 big square at the bottom, 2 and 3 tall on top), one page per swipe.
 - **Result priority:** ranking by a small ML model (SLM). Not started.
 - **Built on Gecko:** done.
 - **Scroll on tabs (up and down):** part of service tabs (confirmed by the owner with the sketch). Each card is a live,
-  interactive page: up and down scrolls the page, and left and right swipes between the cards in that row. Sideways
+  interactive page: up and down scrolls the page, and left and right swipes turn the page of cards. Sideways
   swipes must reach the cards even when the page under the finger could scroll sideways itself.
 - **Floating address bar (laptop only):** a right-click or double-click anywhere on a page opens the usual menu with an
   empty URL box above it, which always opens a new tab. This is for the desktop prototype, not Android.
@@ -358,6 +358,10 @@ Oldest first.
    destination rule; the owner has yet to confirm that.
 10. The tab card must not leave the screen when dragged up. Releasing into tab view animates the card into its place
     there, like Chrome.
+11. **Results screen layout (2026-11-20):** it is a tab group of the best options for a search, in priority order.
+    Priority 1 is the big square card at the bottom, 2 the upper-left and 3 the upper-right portrait cards; swiping
+    left shows the next three. Swipes must not be over-sensitive: one page per swipe. Motivation: the sources in
+    Google's AI answers beat Google's ranked results.
 
 ## Lessons (bugs we have hit)
 
@@ -409,7 +413,8 @@ Oldest first.
 ## Next up (the owner's list)
 
 - **Service tabs results screen** (spec: `docs/design/service-tabs.md`):
-  - An upper row of small cards (U1, U2…) and a lower row of AI chat cards (L1, L2…), each ranked separately.
+  - Pages of three cards in priority order: 1 is the big bottom square, 2 and 3 the tall upper cards; swipe left for
+    4–6 and so on.
   - Tapping a card opens it full screen, and the results screen stays open as a tab.
   - A follow-up typed in an AI card goes to that AI only.
 - **Two menus**, whose positions may change:
