@@ -135,7 +135,7 @@ class FoundryResultsFragment : Fragment(), SystemInsetsPaddedFragment {
                         }
                     },
                 )
-                session.loadUrl(service.urlFor(query))
+                session.loadUrl(service.urlFor(query), flags = CARD_LOAD_FLAGS)
             }
         }
 
@@ -152,7 +152,7 @@ class FoundryResultsFragment : Fragment(), SystemInsetsPaddedFragment {
         for ((id, session) in sessions) {
             val service = FoundryServices.all.firstOrNull { it.id == id } ?: continue
             currentUrls.remove(id)
-            session.loadUrl(service.urlFor(input))
+            session.loadUrl(service.urlFor(input), flags = CARD_LOAD_FLAGS)
         }
     }
 
@@ -162,6 +162,13 @@ class FoundryResultsFragment : Fragment(), SystemInsetsPaddedFragment {
         findNavController().navigate(R.id.browserFragment)
     }
 }
+
+/**
+ * Cards are not tabs, so the "open in the YouTube app?" check (app links) has nowhere to ask and would leave the card
+ * blank: load their pages the way "Stay in Foundry" does, without that check.
+ */
+private val CARD_LOAD_FLAGS =
+    EngineSession.LoadUrlFlags.select(EngineSession.LoadUrlFlags.LOAD_FLAGS_BYPASS_LOAD_URI_DELEGATE)
 
 /** Upper-row cards take a little under half the width, so the next card is visibly cut off at the edge. */
 private object UpperCardSize : PageSize {

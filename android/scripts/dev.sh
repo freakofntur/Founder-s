@@ -42,7 +42,7 @@ if [ "$install" = 1 ]; then
   ./mach gradle fenix:installDebug
   adb="${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb"
   for serial in $("$adb" devices | awk 'NR>1 && $2=="device" {print $1}'); do
-    "$adb" -s "$serial" shell monkey -p org.mozilla.fenix.debug -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 &&
+    "$adb" -s "$serial" shell am start -n org.mozilla.fenix.debug/org.mozilla.fenix.HomeActivity >/dev/null 2>&1 &&
       echo "Launched Foundry on $serial"
   done
 else
