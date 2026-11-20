@@ -8,49 +8,58 @@ cards are live pages, ordered by priority: Foundry guesses what the search is ab
 Why: the sources Google's AI answers pick are often better than Google's ranked results. Foundry puts several of
 the best options side by side instead of one list.
 
-## Layout (owner's design, 2026-11-20)
+## Results as a tab group (owner's design, 2026-11-20, supersedes "pages of three")
 
-Each screen page holds three cards. Swiping left turns one page and shows the next three; the next page peeks in at
-the right edge.
+### Where Results lives: the tab view
 
-```
-┌────────────────────────────────────────┐
-│ ┌────────────┐ ┌────────────┐ ┌─       │
-│ │ 2 · …      │ │ 3 · …      │ │        │  upper row: two tall (portrait)
-│ │            │ │            │ │        │  cards, priority 2 left, 3 right
-│ │            │ │            │ │        │
-│ └────────────┘ └────────────┘ └─       │
-│ ┌──────────────────────────┐ ┌─        │
-│ │ 1 · …                    │ │         │  bottom: one big square card,
-│ │                          │ │         │  priority 1
-│ │                          │ │         │
-│ └──────────────────────────┘ └─        │
-│ (        query  ← search bar         ) │
-└────────────────────────────────────────┘
-   page 2 holds priorities 4 (bottom), 5, 6 (top) …
-```
+The tabs view (the tabs tray) becomes a variant of the usual **tab groups** view found in other browsers:
 
-- Each card's header shows its priority and name, for example "1 · AI Mode".
-- A swipe turns at most one page. A drag must pass half the page width to turn it, unless it is a clear flick.
-- Only the landed page's three cards load.
+- **Zoomed-out view:** every ungrouped tab and every group, side by side.
+- **Group view:** the tabs of one group.
+- **A search is a group.** Searching creates a group for that search, and the **group view is the default view for a
+  result**, instead of opening a single web page.
 
-## Services and priority (first draft)
+### Slot names
 
-| Service | Loads |
+Two rows, numbered separately from 0:
+
+- **U0, U1, U2, …**: the upper row of tall (portrait) windows.
+- **L0, L1, L2, …**: the lower row of landscape or square windows.
+
+### What goes where
+
+Foundry first runs the search on Google **in the background** and reads Google's AI answer and its sources.
+
+| Slot | Holds |
 |---|---|
-| AI Mode | Google AI Mode (`udm=50`): an AI answer with its sources |
-| Google | Google web results |
-| Clips | YouTube search |
-| Images | Google Images |
-| Claude, ChatGPT, Gemini, Grok | The AI with the query |
+| **L0** | Google AI answer (AI Mode) |
+| **U0** | Google search results |
+| **L1** | The main source of the Google AI answer |
+| **U1, U2, U3, …** | The other sources the Google AI answer cites |
+| **L2** | Claude: an "ask" window showing what you typed and Claude's symbol |
+| **L3** | ChatGPT: the same, for ChatGPT |
+| Further L slots | Other important results |
 
-`FoundryPriority` orders them by hints in the query until the on-device model ("Result priority") exists:
+- **Videos and images:** if the Google AI answer cites videos or images, they go in the L row from **L1** on,
+  pushing Claude and ChatGPT further along the L row.
+- **Priority:** 1 = Google AI answer, 2 = Google results, 3 = any video the Google AI answer references.
 
-- Video words (video, watch, song, trailer…): Clips first.
-- Image words (photo, wallpaper…): Images first.
-- Quick facts (weather, price, near, news…): Google first.
-- Questions (why, how, what…, a "?", or six words or more): AI Mode, then the AIs.
-- Otherwise: AI Mode, Google, Claude, Clips, ChatGPT, Images, Gemini, Grok.
+### Opening position
+
+U0 and L0 (Google's own results and AI answer) start **off screen**: you scroll to reach them. When the group opens,
+the visible windows are **U1, U2 and L1**, the sources behind the answer.
+
+### AI windows
+
+L2, L3 and later AI windows don't send the question by themselves. They show what you typed and the AI's symbol, and
+the question goes to that AI only when you ask. This also avoids AI sites rate-limiting or bot-checking automatic
+questions.
+
+### Superseded
+
+Earlier on 2026-11-20: "pages of three cards" (priority 1 big at the bottom, 2 and 3 above, swiping turns a page) with a
+word-based `FoundryPriority`. The slot mapping above replaces it; keep its swipe-paging lessons (turn at most one page,
+half a page or a clear flick).
 
 Each card shows that service's real page. The service-pages approach was agreed, so there are no APIs and your existing
 logins work.
