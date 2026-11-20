@@ -45,7 +45,7 @@ index 59a5f9f5e6..02b26ff720 100644
  
                  openToBrowserAndLoad(
 diff --git a/mobile/android/fenix/app/src/main/res/navigation/nav_graph.xml b/mobile/android/fenix/app/src/main/res/navigation/nav_graph.xml
-index 2a74ab01ff..c139d2d4c4 100644
+index 2a74ab01ff..5c086b339c 100644
 --- a/mobile/android/fenix/app/src/main/res/navigation/nav_graph.xml
 +++ b/mobile/android/fenix/app/src/main/res/navigation/nav_graph.xml
 @@ -482,6 +482,10 @@
@@ -53,8 +53,8 @@ index 2a74ab01ff..c139d2d4c4 100644
          android:label="Downloads" />
  
 +    <fragment
-+        android:id="@+id/foundryResultsFragment"
-+        android:name="org.mozilla.fenix.foundry.results.FoundryResultsFragment" />
++        android:id="@+id/foundryGroupViewFragment"
++        android:name="org.mozilla.fenix.foundry.results.FoundryGroupViewFragment" />
 +
      <fragment
          android:id="@+id/webCompatReporterFragment"

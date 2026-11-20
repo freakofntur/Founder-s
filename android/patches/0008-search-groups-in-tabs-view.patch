@@ -1,0 +1,38 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/tabstray/ui/TabManagementFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/tabstray/ui/TabManagementFragment.kt
+index 4e226d2078..8a0a766c8c 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/tabstray/ui/TabManagementFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/tabstray/ui/TabManagementFragment.kt
+@@ -86,6 +86,7 @@ import org.mozilla.fenix.ext.registerForActivityResult
+ import org.mozilla.fenix.ext.requireComponents
+ import org.mozilla.fenix.ext.runIfFragmentIsAttached
+ import org.mozilla.fenix.ext.tabsClosedUndoMessage
++import org.mozilla.fenix.foundry.results.FoundryResults
+ import org.mozilla.fenix.home.HomeScreenViewModel
+ import org.mozilla.fenix.navigation.DefaultNavControllerProvider
+ import org.mozilla.fenix.navigation.NavControllerProvider
+@@ -613,7 +614,12 @@ class TabManagementFragment : Fragment() {
+         TabsTray(
+             state = state,
+             snackbarHostState = snackbarHostState,
+-            onAction = tabsTrayStore::dispatch,
++            onAction = { action ->
++                val group = (action as? TabGroupAction.OpenTabGroupClicked)?.group
++                if (group == null || !FoundryResults.openGroup(findNavController(), group.id)) {
++                    tabsTrayStore.dispatch(action)
++                }
++            },
+             onTabPageClick = { page ->
+                 onTabPageClick(
+                     tabsTrayInteractor = tabManagerInteractor,
+@@ -684,6 +690,11 @@ class TabManagementFragment : Fragment() {
+             is TabsTrayItem.Tab -> handleTabClick(item)
+ 
+             is TabsTrayItem.TabGroup -> {
++                if (tabsTrayStore.state.mode is TabsTrayState.Mode.Normal &&
++                    FoundryResults.openGroup(findNavController(), item.id)
++                ) {
++                    return
++                }
+                 tabsTrayStore.dispatch(TabGroupAction.TabGroupClicked(group = item))
+             }
+         }

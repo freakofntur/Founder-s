@@ -11,24 +11,42 @@ import mozilla.components.support.ktx.kotlin.isUrl
 import org.mozilla.fenix.R
 
 /**
- * Entry point for Foundry's Results screen ("service tabs"): a search typed in the address bar opens
- * [FoundryResultsFragment] instead of a single search engine page.
+ * Entry points for Foundry's search results: a search typed in the address bar becomes a search group shown in the
+ * Group view ([FoundryGroupViewFragment]) instead of a single search engine page, and Overview (the tabs view) opens
+ * search groups there too.
  */
 object FoundryResults {
-    const val ARG_QUERY = "query"
+    const val ARG_GROUP_ID = "groupId"
 
     /**
-     * Opens the Results screen for [text] if it is a search (not a web address) outside private browsing.
+     * Starts a search group for [text] and opens it in the Group view, if [text] is a search (not a web address)
+     * outside private browsing.
      *
-     * @return Whether the Results screen was opened; if not, the caller loads [text] as usual.
+     * @return Whether the Group view was opened; if not, the caller loads [text] as usual.
      */
     fun openIfSearch(navController: NavController, text: String, private: Boolean): Boolean {
         val query = text.trim()
         if (private || query.isEmpty() || query.isUrl()) return false
+        val groupId = FoundrySearchGroups.start(navController.context, query)
         navController.navigate(
-            R.id.foundryResultsFragment,
-            Bundle().apply { putString(ARG_QUERY, query) },
+            R.id.foundryGroupViewFragment,
+            Bundle().apply { putString(ARG_GROUP_ID, groupId) },
             NavOptions.Builder().setPopUpTo(R.id.homeFragment, false).build(),
+        )
+        return true
+    }
+
+    /**
+     * Opens [groupId] in the Group view if it is a search group; other groups keep Fenix's own view.
+     *
+     * @return Whether it was opened.
+     */
+    fun openGroup(navController: NavController, groupId: String): Boolean {
+        if (!FoundrySearchGroups.isSearchGroup(navController.context, groupId)) return false
+        navController.navigate(
+            R.id.foundryGroupViewFragment,
+            Bundle().apply { putString(ARG_GROUP_ID, groupId) },
+            NavOptions.Builder().setPopUpTo(R.id.tabManagementFragment, true).build(),
         )
         return true
     }
