@@ -10,6 +10,14 @@ the best options side by side instead of one list.
 
 ## Results as a tab group (owner's design, 2026-11-20, supersedes "pages of three")
 
+### Names for the three levels (proposed 2026-11-20, waiting for the owner's OK)
+
+| Name | What it is |
+|---|---|
+| **Overview** | All tabs and groups, zoomed out (Fenix's tabs tray). Search groups show here like any group. |
+| **Group view** | One group opened: for a search, the U and L rows below. |
+| **Page** | One tab full screen (the normal browser screen), reached with a window's **Open** button. |
+
 ### Where Results lives: the tab view
 
 The tabs view (the tabs tray) becomes a variant of the usual **tab groups** view found in other browsers:
@@ -42,6 +50,10 @@ Foundry first runs the search on Google **in the background** and reads Google's
 
 - **Videos and images:** if the Google AI answer cites videos or images, they go in the L row from **L1** on,
   pushing Claude and ChatGPT further along the L row.
+  - *How it's built (Founder's reading, owner to confirm):* with no cited video or image, L1 is the first cited page
+    (the main source) and U1, U2, … are the next ones. With cited videos or images, they take L1, L2, … and **all**
+    cited pages go in the U row, so the main source is U1. Either way the opening view (U1, U2, L1) shows the top
+    sources. Videos are recognised by address (YouTube, youtu.be, Vimeo, TikTok, Instagram reels), images by file type.
 - **Priority:** 1 = Google AI answer, 2 = Google results, 3 = any video the Google AI answer references.
 
 ### Opening position
@@ -66,11 +78,26 @@ logins work.
 
 ## Interactions
 
-- **Swipe left or right** to turn to the next or previous three cards.
-- **Scroll inside a card** to scroll that service's page without leaving the results screen.
-- **Tap a card** to open it full screen. The results screen stays open in the background like a tab, with its other
-  cards kept as they were, so you can go back to it.
-- **The follow-up box in an AI card** sends the message to that AI only.
+- **Swipe left or right** anywhere on a row (even over a live page) to move that row by one window. Each row moves on
+  its own. Pages never scroll sideways inside a window (owner's rule, 2026-11-20).
+- **Scroll up and down inside a window** to scroll that page without leaving the Group view.
+- **Open** on a window shows that tab as a Page. The group keeps its other windows as they were; Overview (or Back)
+  returns to it.
+- **‹ Overview** in the group header goes to Overview.
+- **The search box** at the bottom starts a new search group (tapping it selects the old query, so typing replaces it).
+- **The follow-up box in an AI window** sends the message to that AI only.
+
+### How it's built (2026-11-20)
+
+- A search creates a real tab group (the same kind as Fenix's own groups), named after the query. Each window is a tab
+  in that group, created the first time the window is shown, so a search costs only what you look at.
+- Google AI Mode loads in L0 in the background. Foundry's built-in extension reads the answer's cited sources (Google
+  keeps them as data next to each citation chip, not as links) and sends them to the app in citation order. On the
+  emulator the sources arrive 15 to 25 seconds after the search; with none after 45 s, the rows open on U0 and L0.
+- Screenshots: [light](../references/group-view-light.png), [dark](../references/group-view-dark.png),
+  [more sources](../references/group-view-more-sources.png), [Claude ask window](../references/group-view-claude-ask.png),
+  [Overview with search groups](../references/overview-with-search-groups.png),
+  [Overview's groups page](../references/overview-groups-page.png).
 
 ## Menus
 

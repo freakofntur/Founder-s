@@ -19,13 +19,14 @@ The project moved to Gecko because the owner wants Firefox extensions to work. A
 
 - **Bottom UI on mobile:** major controls within thumb reach, swipe gestures. Done: bottom toolbar and the gesture
   system below.
-- **Multiple results for a search ("service tabs"):** spec in `docs/design/service-tabs.md`. Built: pages of three
-  live cards ranked by priority (1 big square at the bottom, 2 and 3 tall on top), one page per swipe.
+- **Multiple results for a search ("service tabs"):** spec in `docs/design/service-tabs.md`, "Results as a tab group".
+  Built (2026-11-20): a search is a real tab group shown in the **Group view**: an upper row U0, U1, … and a lower row
+  L0, L1, …, filled from Google AI Mode's cited sources (read in the background), with Claude and ChatGPT ask windows.
 - **Result priority:** ranking by a small ML model (SLM). Not started.
 - **Built on Gecko:** done.
-- **Scroll on tabs (up and down):** part of service tabs (confirmed by the owner with the sketch). Each card is a live,
-  interactive page: up and down scrolls the page, and left and right swipes turn the page of cards. Sideways
-  swipes must reach the cards even when the page under the finger could scroll sideways itself.
+- **Scroll on tabs (up and down):** part of service tabs (confirmed by the owner with the sketch). Each window is a
+  live, interactive page: up and down scrolls the page; left and right always move that row by one window, never
+  the page (owner's rule, 2026-11-20). Built with `SidewaysSwipeFrame` (see the Group view section).
 - **Floating address bar (laptop only):** a right-click or double-click anywhere on a page opens the usual menu with an
   empty URL box above it, which always opens a new tab. This is for the desktop prototype, not Android.
 
@@ -56,8 +57,13 @@ accordingly. Say so plainly when something is a poor use of time. Ask before big
 - **Learning:** ranking ("Result priority") needs signal. Plan opt-in, private, on-device metrics (such as which cards
   get opened) rather than server telemetry.
 
-## Where things stand (2026-11-19)
+## Where things stand (2026-11-20)
 
+- **Names for the three levels** (proposed by Founder 2026-11-20, waiting for the owner's OK): **Overview** = all tabs
+  and groups (Fenix's tabs tray, zoomed out); **Group view** = one group opened, with the U and L rows
+  (`FoundryGroupViewFragment`); **Page** = one tab full screen (Fenix's browser screen). Use them everywhere.
+- **Results as a tab group shipped to `main` (1c6d053)**, tested on the emulator (light and dark). See "Group view" below.
+  Open: the owner's test on the phone; whether the video placement reading is right (see the design doc).
 - **All work goes straight to `main`.** No feature branches and no PRs (the owner's rule, 2026-11-19). Commit and push
   to `main`; every push that touches `android/**` builds the nightly APK. The old
   `claude/browser-search-engine-skeleton-j5ayor` branch was fast-forwarded into `main` and is retired.
@@ -117,7 +123,8 @@ Which Firefox files each patch edits, and which of Foundry's own files in `andro
 | 0004 foundry-name-and-logo | `res/values/strings.xml`, `res/values/styles.xml`, `res/values-night/styles.xml`, `res/values-night-v27/styles.xml` | English strings say Foundry instead of Firefox, except Mozilla-service, legal, sync and privacy strings; logo and wordmark attributes |
 | 0005 taller-address-bar | android-components `compose/browser-toolbar/.../ui/FullDisplayToolbar.kt` and `BrowserEditToolbar.kt`; `res/values/dimens.xml` | 84 dp toolbar with a 60 dp pill |
 | 0006 foundry-crash-log | `java/.../FenixApplication.kt`, `java/.../HomeActivity.kt` (own file: `java/.../foundry/FoundryCrashLog.kt`) | Records crashes and shows them with a Copy button on next launch |
-| 0007 service-tabs | `res/navigation/nav_graph.xml`, `java/.../search/BrowserToolbarSearchMiddleware.kt`, `java/.../search/FenixSearchMiddleware.kt` (own files: `java/.../foundry/results/*`) | Searches open the Results screen (service tabs) |
+| 0007 service-tabs | `res/navigation/nav_graph.xml`, `java/.../search/BrowserToolbarSearchMiddleware.kt`, `java/.../search/FenixSearchMiddleware.kt` (own files: `java/.../foundry/results/*`, `assets/extensions/foundry/*`) | Searches start a search group and open the Group view |
+| 0008 search-groups-in-tabs-view | `java/.../tabstray/ui/TabManagementFragment.kt` | Tapping a search group in Overview opens the Group view (other groups keep Fenix's view) |
 
 ### Making a change
 
@@ -326,6 +333,26 @@ The direction is decided after 12 dp of movement (`DECIDE_DP`):
 - The toolbar is 84 dp tall with a 60 dp pill, so its top is roughly level with the keyboard's space bar.
 - Foundry name and logo: a white F on a blue rounded square.
 
+## Group view (search results as a tab group)
+
+Spec: `docs/design/service-tabs.md`, "Results as a tab group". Code: `java/.../foundry/results/`.
+
+- **Flow:** `FoundryResults.openIfSearch` (called from patch 0007) → `FoundrySearchGroups.start` remembers the group
+  (JSON file `foundry-search-groups.json`), installs Foundry's built-in extension and opens AI Mode (`udm=50`) in a
+  background tab → navigates to `FoundryGroupViewFragment`.
+- **Reading AI Mode:** `assets/extensions/foundry/aimode.js` runs on `www.google.com/search?udm=50`. AI Mode's citation
+  chips are buttons without links; each chip's sources sit as escaped JSON in an HTML comment
+  (`<!--TgQPHd|||[[...]]-->`) next to it. The script reads those comments in page order every 2 s and sends the list
+  when it has held still for one check (`FoundryAiMode` receives it per session). Plain links are a fallback. Videos
+  are told apart by address (YouTube watch/shorts, youtu.be, Vimeo, TikTok video, Instagram reel), images by file type.
+  Google can change this format at any time: if sources stop appearing, check the comment format first.
+- **Tabs:** every window is a real tab in a real Fenix tab group (`tabGroupRepository.createTabGroupWithTabs`), created
+  the first time the window is shown (lazy). L0 (AI Mode) always loads, because it is read. Give-up after 45 s with no
+  sources: the rows open on U0/L0.
+- **Rows:** two `HorizontalPager`s with `userScrollEnabled = false`; `FoundryRowDrag` moves them one window per swipe.
+  Sideways drags are taken by `Modifier.sidewaysSwipes` on Compose parts and by `SidewaysSwipeFrame` around each page.
+- **Open** releases every page view first, selects the tab and goes to the browser (a Page).
+
 ## Decision log (confirmed by the owner; don't regress)
 
 Oldest first.
@@ -361,7 +388,15 @@ Oldest first.
 11. **Results screen layout (2026-11-20):** it is a tab group of the best options for a search, in priority order.
     Priority 1 is the big square card at the bottom, 2 the upper-left and 3 the upper-right portrait cards; swiping
     left shows the next three. Swipes must not be over-sensitive: one page per swipe. Motivation: the sources in
-    Google's AI answers beat Google's ranked results.
+    Google's AI answers beat Google's ranked results. **Superseded by 12.**
+12. **Results as a tab group (2026-11-20):** a search is a group in the tabs view; its Group view is the default view
+    for a search. Lower row L0 = Google AI Mode, L1 = main source, then cited videos/images, then Claude, then
+    ChatGPT; upper row U0 = Google results, U1… = other cited sources. Opens with U1, U2 and L1 visible; U0 and L0 one
+    swipe back. AI windows only ask when the user taps Ask.
+13. **Gestures inside the Group view (2026-11-20):** inside a window the page only scrolls up and down. Left and right
+    always move between windows in that row, never scroll the page. Every window in a row must be reachable.
+14. **Group view look (2026-11-20):** like a tab-group view, not a web page: the tray's colours (and dark theme), cards
+    with rounded corners, shadows and spacing, and a group header with the query and the way back to Overview.
 
 ## Lessons (bugs we have hit)
 
@@ -381,6 +416,21 @@ Oldest first.
   keystore fixed this.
 - `git diff` ignores untracked files. This no longer matters for patches, because new files live in `android/src/`.
 - The release asset can lag behind the push, so always check `Last-Modified`.
+- **Live pages inside Compose:** a GeckoView in an `AndroidView` can ask its parents not to intercept touches, and then
+  Compose never sees the drag. Catch drags at the View level around the page (`SidewaysSwipeFrame`) as well.
+- Removing an `AndroidView` with a live page in the middle of a pager swipe crashed Compose ("LayoutNode should be
+  attached to an owner"). Once a window's page has started, keep it; hand a page over by calling `release()` on the
+  view instead of removing views.
+- A GeckoSession can be shown by only one view at a time (`Display already acquired`). Release before another screen
+  shows the same tab; when coming back, wait a moment (`PAGE_HANDOVER_DELAY_MS`).
+- **Built-in web extensions** are only reinstalled when their manifest `version` changes. Bump it on every change to
+  `assets/extensions/foundry`, or the old script keeps running.
+- YouTube's `www` address redirects to `m.` on phones, and Fenix's "open in the YouTube app?" check stops that redirect
+  in a tab that isn't selected. Load `m.youtube.com` directly.
+- **Testing on the emulator:** it is slow, so adb taps and swipes can land on a screen that hasn't appeared yet (a
+  swipe in Overview dragged tabs into a new group; a tap may have hit "Close all tabs"). Screenshot before every
+  gesture, use swipes of 800 ms, and wait for the keyboard (`dumpsys input_method | grep mInputShown=true`) before
+  typing.
 
 ## Working with the owner
 
@@ -412,11 +462,13 @@ Oldest first.
 
 ## Next up (the owner's list)
 
-- **Service tabs results screen** (spec: `docs/design/service-tabs.md`):
-  - Pages of three cards in priority order: 1 is the big bottom square, 2 and 3 the tall upper cards; swipe left for
-    4–6 and so on.
-  - Tapping a card opens it full screen, and the results screen stays open as a tab.
-  - A follow-up typed in an AI card goes to that AI only.
+- **Group view polish** (spec: `docs/design/service-tabs.md`):
+  - The owner tests it on the phone (logged in to Claude and ChatGPT).
+  - Back from a Page opened from the Group view should return to the Group view (today Back goes through the page's
+    own history first; Claude's logged-out redirect loop traps it).
+  - Overview thumbnails of search groups are only icons (Fenix takes thumbnails of selected tabs only).
+  - Empty search groups (all tabs closed) stay listed in Overview with "0 tabs"; clean them up.
+  - A follow-up typed in an AI window goes to that AI only.
 - **Two menus**, whose positions may change:
   - `>`: profile, saved and active tabs, reading lists.
   - `⋮`: a traditional browser menu.
