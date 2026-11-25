@@ -12,6 +12,12 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import androidx.activity.ComponentDialog
+import androidx.activity.addCallback
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.rememberSplineBasedDecay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -53,6 +59,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
@@ -61,12 +68,15 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -112,7 +122,9 @@ import org.mozilla.fenix.theme.FirefoxTheme
  * that tab as a Page. The AI windows (Claude, ChatGPT) only ask when you tap Ask.
  *
  * Like Chrome's tab groups, the Group view is a panel over Overview: Overview stays visible, dimmed, around it, and
- * tapping outside the panel (or Back) closes it.
+ * tapping outside the panel (or Back) closes it. The panel grows in when it opens and shrinks away when it closes.
+ *
+ * Every group opens here, not only searches: a normal tab group's tabs are laid out by [FoundryRows.forTabs].
  */
 class FoundryGroupViewFragment : DialogFragment() {
     private val groupId: String by lazy { arguments?.getString(FoundryResults.ARG_GROUP_ID).orEmpty() }
@@ -126,9 +138,13 @@ class FoundryGroupViewFragment : DialogFragment() {
     /** The page views on screen, so [openPage] can hand their pages over without removing views mid-frame. */
     private val liveViews = mutableSetOf<EngineView>()
 
+    /** Set when the panel should close: [Overlay] plays the closing animation, then dismisses. */
+    private var closing by mutableStateOf(false)
+
     /** A full-screen, see-through window: [Overlay] draws the dimmed surround and the panel itself. */
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog =
-        Dialog(requireContext(), android.R.style.Theme_Translucent_NoTitleBar).apply {
+        ComponentDialog(requireContext(), android.R.style.Theme_Translucent_NoTitleBar).apply {
+            onBackPressedDispatcher.addCallback(this@FoundryGroupViewFragment) { close() }
             window?.apply {
                 setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
                 setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -148,37 +164,68 @@ class FoundryGroupViewFragment : DialogFragment() {
         pagesAllowed = false
         return content {
             FirefoxTheme {
-                val groups by FoundrySearchGroups.groups(requireContext()).collectAsState()
-                val group = groups?.get(groupId)
-                Overlay(onOutside = ::dismiss) {
-                    if (group == null) {
-                        if (groups != null) GoneMessage()
-                        return@Overlay
-                    }
-                    GroupView(
-                        group = group,
-                        onSubmit = ::submit,
-                        window = { slot, window, isShown, modifier ->
-                            WindowCard(
-                                slot = slot,
-                                window = window,
-                                query = group.query,
-                                modifier = modifier,
-                                onOpen = { tabId -> openPage(tabId) },
-                                onAsk = { w -> FoundrySearchGroups.ensureTab(requireContext(), groupId, w) },
-                            ) { w ->
-                                WindowPage(
-                                    groupId = groupId,
-                                    window = w,
-                                    show = isShown && pagesAllowed,
-                                    liveViews = liveViews,
+                val context = LocalContext.current
+                val searchGroups by FoundrySearchGroups.groups(context).collectAsState()
+                val search = searchGroups?.get(groupId)
+                val tabs by produceState<List<FoundryWindow>?>(initialValue = null, groupId) {
+                    FoundrySearchGroups.tabsOf(context, groupId).collect { value = it }
+                }
+                Overlay(closing = closing, onOutside = ::close, onClosed = ::dismissAllowingStateLoss) {
+                    val plain = tabs
+                    when {
+                        search != null ->
+                            GroupView(
+                                rows = search.rows(),
+                                opening = FoundryRows.OPENING_INDEX,
+                                openAtStart = search.hasNoSources,
+                                query = search.query,
+                                onSubmit = ::submit,
+                                window = { slot, window, isShown, modifier ->
+                                    Window(slot, window, isShown, search.query, modifier)
+                                },
+                            )
+                        searchGroups != null && plain != null ->
+                            if (plain.isEmpty()) {
+                                GoneMessage()
+                            } else {
+                                GroupView(
+                                    rows = FoundryRows.forTabs(plain),
+                                    opening = 0,
+                                    openAtStart = false,
+                                    query = "",
+                                    onSubmit = ::submit,
+                                    window = { slot, window, isShown, modifier ->
+                                        Window(slot, window, isShown, "", modifier)
+                                    },
                                 )
                             }
-                        },
-                    )
+                    }
                 }
             }
         }
+    }
+
+    @Composable
+    private fun Window(slot: String, window: FoundryWindow?, isShown: Boolean, query: String, modifier: Modifier) {
+        WindowCard(
+            slot = slot,
+            window = window,
+            query = query,
+            modifier = modifier,
+            onOpen = { tabId -> openPage(tabId) },
+            onAsk = { w -> FoundrySearchGroups.ensureTab(requireContext(), groupId, w) },
+        ) { w ->
+            WindowPage(groupId = groupId, window = w, show = isShown && pagesAllowed, liveViews = liveViews)
+        }
+    }
+
+    /**
+     * Closes the panel with its animation (tap outside, Back). Web pages draw on their own surface, which ignores the
+     * panel's fade and shrink, so they are hidden first and the cards animate with their own backgrounds.
+     */
+    private fun close() {
+        liveViews.forEach { it.asView().visibility = View.INVISIBLE }
+        closing = true
     }
 
     override fun onResume() {
@@ -221,71 +268,136 @@ private const val MAX_LOWER_HEIGHT_FRACTION = 0.42f
 /** Height over width of a lower-row window: landscape, close to a video's shape. */
 private const val LOWER_ASPECT = 0.75f
 
-private val SIDE_PADDING = 10.dp
 private val GAP = 10.dp
+
+/** How much of the next window shows at each edge of a row, so you can see there is more both ways. */
+private val PEEK = 22.dp
+
+/** Space from the panel's edge to a row's main windows: the peeking window plus a gap. */
+private val EDGE = PEEK + GAP
 private val CARD_SHAPE = RoundedCornerShape(16.dp)
 
 @Composable
 private fun GroupView(
-    group: FoundrySearchGroup,
+    rows: FoundryRows,
+    opening: Int,
+    openAtStart: Boolean,
+    query: String,
     onSubmit: (String) -> Unit,
     window: @Composable (slot: String, window: FoundryWindow?, isShown: Boolean, modifier: Modifier) -> Unit,
 ) {
-    val rows = group.rows()
-    val upper = rememberPagerState(initialPage = FoundryRows.OPENING_INDEX) { rows.upper.size }
-    val lower = rememberPagerState(initialPage = FoundryRows.OPENING_INDEX) { rows.lower.size }
+    val upper = rememberPagerState(initialPage = opening) { rows.upper.size }
+    val lower = rememberPagerState(initialPage = opening) { rows.lower.size }
+    KeepOpeningUntilMoved(upper, opening, rows.upper.size)
+    KeepOpeningUntilMoved(lower, opening, rows.lower.size)
 
-    // Nothing was cited: open on Google's own windows instead of the AI windows.
-    LaunchedEffect(group.hasNoSources) {
-        if (group.hasNoSources) {
-            if (upper.currentPage == FoundryRows.OPENING_INDEX) upper.animateScrollToPage(0)
-            if (lower.currentPage == FoundryRows.OPENING_INDEX) lower.animateScrollToPage(0)
+    // A search whose answer cited nothing: open on Google's own windows instead of the empty source windows.
+    LaunchedEffect(openAtStart) {
+        if (openAtStart) {
+            if (upper.currentPage == opening) upper.animateScrollToPage(0)
+            if (lower.currentPage == opening) lower.animateScrollToPage(0)
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth().weight(1f)) {
-            val upperWidth = (maxWidth - SIDE_PADDING * 2 - GAP) / 2
-            val lowerHeight = minOf((maxWidth - SIDE_PADDING * 2) * LOWER_ASPECT, maxHeight * MAX_LOWER_HEIGHT_FRACTION)
+            val upperWidth = (maxWidth - EDGE * 2 - GAP) / 2
+            val lowerHeight = minOf((maxWidth - EDGE * 2) * LOWER_ASPECT, maxHeight * MAX_LOWER_HEIGHT_FRACTION)
             Column(modifier = Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(GAP)) {
-                WindowRow(state = upper, pageSize = PageSize.Fixed(upperWidth), modifier = Modifier.weight(1f)) { i ->
-                    val isShown = i == upper.settledPage || i == upper.settledPage + 1
-                    window("U$i", rows.upper[i], isShown, Modifier.fillMaxSize())
-                }
+                val upperShown by mostlyVisible(upper)
                 WindowRow(
-                    state = lower,
-                    pageSize = PageSize.Fill,
-                    modifier = Modifier.height(lowerHeight),
-                    peek = 28.dp,
+                    state = upper,
+                    pageSize = PageSize.Fixed(upperWidth),
+                    snap = false,
+                    modifier = Modifier.weight(1f),
                 ) { i ->
-                    window("L$i", rows.lower[i], i == lower.settledPage, Modifier.fillMaxSize())
+                    window("U$i", rows.upper[i], i in upperShown, Modifier.fillMaxSize())
+                }
+                if (rows.lower.isNotEmpty()) {
+                    WindowRow(
+                        state = lower,
+                        pageSize = PageSize.Fill,
+                        snap = true,
+                        modifier = Modifier.height(lowerHeight),
+                    ) { i ->
+                        window("L$i", rows.lower[i], i == lower.settledPage, Modifier.fillMaxSize())
+                    }
                 }
             }
         }
-        SearchBar(query = group.query, onSubmit = onSubmit)
+        SearchBar(query = query, onSubmit = onSubmit)
     }
 }
 
 /**
- * One row of windows. Every sideways drag anywhere on the row moves the row by one window (owner's rule: inside a
- * window the page only scrolls up and down), see [sidewaysSwipes].
+ * Keeps a row on its [opening] window while its windows change underneath, until the person moves the row.
+ *
+ * A group opens before Google's AI answer has been read: the row may hold one window at first (so the pager clamps to
+ * window 0), and sources inserted later shift the windows by index. Without this the row opened on U0, or on U2 and U3,
+ * instead of U1 and U2.
+ */
+@Composable
+private fun KeepOpeningUntilMoved(state: PagerState, opening: Int, size: Int) {
+    var moved by remember(state) { mutableStateOf(false) }
+    var aligning by remember(state) { mutableStateOf(false) }
+    LaunchedEffect(state) {
+        snapshotFlow { state.isScrollInProgress }.collect { scrolling -> if (scrolling && !aligning) moved = true }
+    }
+    LaunchedEffect(state, size) {
+        if (moved || size <= opening) return@LaunchedEffect
+        val target = opening.coerceAtMost(size - 1)
+        if (state.currentPage != target || state.currentPageOffsetFraction != 0f) {
+            aligning = true
+            try {
+                state.scrollToPage(target)
+            } finally {
+                aligning = false
+            }
+        }
+    }
+}
+
+/**
+ * The windows of a free-scrolling row that are more than half on screen. Only these load their pages, so the windows
+ * peeking in at the edges stay placeholders (a search only loads what you look at).
+ */
+@Composable
+private fun mostlyVisible(state: PagerState) =
+    remember(state) {
+        derivedStateOf {
+            val info = state.layoutInfo
+            info.visiblePagesInfo
+                .filter { page ->
+                    val start = maxOf(page.offset, info.viewportStartOffset)
+                    val end = minOf(page.offset + info.pageSize, info.viewportEndOffset)
+                    (end - start) * 2 > info.pageSize
+                }
+                .map { it.index }
+                .toSet()
+        }
+    }
+
+/**
+ * One row of windows. Every sideways drag anywhere on the row moves the row (owner's rule: inside a window the page
+ * only scrolls up and down), see [sidewaysSwipes]. The windows beyond each edge peek in by [PEEK] on both sides.
  */
 @Composable
 private fun WindowRow(
     state: PagerState,
     pageSize: PageSize,
+    snap: Boolean,
     modifier: Modifier,
-    peek: Dp = 0.dp,
     page: @Composable (Int) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current.density
-    val rowDrag = remember(state) { FoundryRowDrag(state, scope, FLING_DP_PER_S * density) }
+    val decay = rememberSplineBasedDecay<Float>()
+    val rowDrag = remember(state) { FoundryRowDrag(state, scope, snap, FLING_DP_PER_S * density, decay) }
     CompositionLocalProvider(LocalRowDrag provides rowDrag) {
         HorizontalPager(
             state = state,
             modifier = modifier.fillMaxWidth().sidewaysSwipes(rowDrag),
-            contentPadding = PaddingValues(start = SIDE_PADDING, end = SIDE_PADDING + peek),
+            contentPadding = PaddingValues(horizontal = EDGE),
             pageSize = pageSize,
             pageSpacing = GAP,
             beyondViewportPageCount = 1,
@@ -336,14 +448,24 @@ private fun Modifier.sidewaysSwipes(rowDrag: FoundryRowDrag): Modifier =
 
 /**
  * The Group view's frame: Overview shows through, dimmed, around a panel. Tapping the dimmed part calls [onOutside].
+ * The panel grows in and the dim fades in when it opens; when [closing] turns true they play backwards, then
+ * [onClosed] runs.
  */
 @Composable
-private fun Overlay(onOutside: () -> Unit, panel: @Composable () -> Unit) {
+private fun Overlay(closing: Boolean, onOutside: () -> Unit, onClosed: () -> Unit, panel: @Composable () -> Unit) {
+    var opened by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { opened = true }
+    val progress by animateFloatAsState(
+        targetValue = if (opened && !closing) 1f else 0f,
+        animationSpec = tween(durationMillis = PANEL_ANIMATION_MS, easing = FastOutSlowInEasing),
+        label = "panel",
+        finishedListener = { if (closing) onClosed() },
+    )
     Box(
         modifier =
             Modifier
                 .fillMaxSize()
-                .background(SCRIM)
+                .background(SCRIM.copy(alpha = SCRIM.alpha * progress))
                 .clickable(interactionSource = null, indication = null, onClick = onOutside)
                 .windowInsetsPadding(WindowInsets.systemBars)
                 .imePadding()
@@ -353,6 +475,13 @@ private fun Overlay(onOutside: () -> Unit, panel: @Composable () -> Unit) {
             modifier =
                 Modifier
                     .fillMaxSize()
+                    .graphicsLayer {
+                        val scale = PANEL_START_SCALE + (1f - PANEL_START_SCALE) * progress
+                        scaleX = scale
+                        scaleY = scale
+                        alpha = progress
+                        transformOrigin = TransformOrigin(0.5f, 1f)
+                    }
                     // Taps inside the panel that nothing else takes must not close it.
                     .clickable(interactionSource = null, indication = null, onClick = {}),
             shape = RoundedCornerShape(28.dp),
@@ -363,6 +492,12 @@ private fun Overlay(onOutside: () -> Unit, panel: @Composable () -> Unit) {
         }
     }
 }
+
+/** How long the panel takes to open or close. */
+private const val PANEL_ANIMATION_MS = 260
+
+/** The panel's size when it starts opening or finishes closing, as a share of its full size. */
+private const val PANEL_START_SCALE = 0.86f
 
 /** How much of Overview shows around the Group view's panel: enough to see it and tap it, little enough to keep room. */
 private val PANEL_MARGIN = 12.dp
@@ -566,6 +701,7 @@ private fun label(window: FoundryWindow): String =
         FoundryWindow.Role.GOOGLE -> "Google results"
         FoundryWindow.Role.CLAUDE, FoundryWindow.Role.CHATGPT -> window.title
         FoundryWindow.Role.SOURCE -> host(window.url)
+        FoundryWindow.Role.TAB -> window.title.ifBlank { host(window.url) }
     }
 
 private fun host(url: String): String = Uri.parse(url).host.orEmpty().removePrefix("www.").removePrefix("m.")

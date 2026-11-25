@@ -4,6 +4,7 @@
 
 package org.mozilla.fenix.foundry.results
 
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -22,6 +23,26 @@ import org.json.JSONObject
 data class FoundrySource(val url: String, val title: String, val kind: Kind) {
     /** What a source is, read from its address. */
     enum class Kind { PAGE, VIDEO, IMAGE }
+
+    companion object {
+        private val VIDEO_HOSTS = setOf("youtube.com", "youtu.be", "vimeo.com")
+        private val IMAGE_FILE = Regex("""\.(jpe?g|png|webp|gif|avif)$""", RegexOption.IGNORE_CASE)
+
+        /** The same rule as `aimode.js`'s `kindOf`, for tabs that were not read from an AI answer. */
+        fun kindOf(url: String): Kind {
+            val uri = Uri.parse(url)
+            val host = uri.host.orEmpty().removePrefix("www.").removePrefix("m.")
+            val path = uri.path.orEmpty()
+            return when {
+                host == "youtube.com" && (path == "/watch" || path.startsWith("/shorts/")) -> Kind.VIDEO
+                host in VIDEO_HOSTS && host != "youtube.com" -> Kind.VIDEO
+                host == "tiktok.com" && path.contains("/video/") -> Kind.VIDEO
+                host == "instagram.com" && path.startsWith("/reel") -> Kind.VIDEO
+                IMAGE_FILE.containsMatchIn(path) -> Kind.IMAGE
+                else -> Kind.PAGE
+            }
+        }
+    }
 }
 
 /**

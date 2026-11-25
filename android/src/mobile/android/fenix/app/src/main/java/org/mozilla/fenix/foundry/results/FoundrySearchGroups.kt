@@ -14,7 +14,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
@@ -46,8 +49,8 @@ data class FoundryWindow(
     val kind: FoundrySource.Kind = FoundrySource.Kind.PAGE,
     val tabId: String? = null,
 ) {
-    /** What the window holds; [rows] places windows by role. */
-    enum class Role { AI_MODE, GOOGLE, SOURCE, CLAUDE, CHATGPT }
+    /** What the window holds; [FoundrySearchGroup.rows] places windows by role. [TAB] is a tab of a normal group. */
+    enum class Role { AI_MODE, GOOGLE, SOURCE, CLAUDE, CHATGPT, TAB }
 
     /** Whether this is an AI that is only asked when the user says so. */
     val isAskWindow: Boolean
@@ -63,8 +66,19 @@ data class FoundryWindow(
  */
 data class FoundryRows(val upper: List<FoundryWindow?>, val lower: List<FoundryWindow?>) {
     companion object {
-        /** The window each row opens on: U1/U2 and L1, with U0 and L0 (Google's own) one swipe back. */
+        /** The window a search group's rows open on: U1/U2 and L1, with U0 and L0 (Google's own) one swipe back. */
         const val OPENING_INDEX = 1
+
+        /**
+         * Lays out a normal tab group (no search, no AI answer) the same way a search group lays out its sources:
+         * pages in the upper row and videos and images in the lower row, each in the group's tab order. With no
+         * videos or images there is no lower row and the pages get the whole height.
+         */
+        fun forTabs(tabs: List<FoundryWindow>): FoundryRows {
+            val media = tabs.filter { it.kind != FoundrySource.Kind.PAGE }
+            val pages = tabs.filter { it.kind == FoundrySource.Kind.PAGE }
+            return if (pages.isEmpty()) FoundryRows(upper = media, lower = emptyList()) else FoundryRows(pages, media)
+        }
     }
 }
 
@@ -138,10 +152,6 @@ object FoundrySearchGroups {
         return state
     }
 
-    /** Whether [groupId] is a search group (so the tabs view opens it in Foundry's group view). */
-    @MainThread
-    fun isSearchGroup(context: Context, groupId: String): Boolean = load(context).containsKey(groupId)
-
     /**
      * Starts a search group for [query]: remembers it, opens AI Mode in a background tab once the AI Mode reader is
      * ready, and fills in the sources when the answer has been read.
@@ -196,6 +206,30 @@ object FoundrySearchGroups {
             return tab.id
         }
         return openTab(context, groupId, window)
+    }
+
+    /**
+     * The tabs of any tab group as windows, in the browser's tab order, kept up to date as tabs are added, closed or
+     * change page. An empty list means the group is gone or has no open tabs.
+     */
+    @MainThread
+    fun tabsOf(context: Context, groupId: String): Flow<List<FoundryWindow>> {
+        val components = context.components
+        return combine(components.core.tabGroupRepository.tabGroupDataFlow, components.core.store.flow()) { data, state ->
+            val ids = data.tabGroups.firstOrNull { it.id == groupId }?.tabIds?.toSet().orEmpty()
+            state.tabs
+                .filter { it.id in ids }
+                .map { tab ->
+                    FoundryWindow(
+                        key = "tab:${tab.id}",
+                        role = FoundryWindow.Role.TAB,
+                        url = tab.content.url,
+                        title = tab.content.title,
+                        kind = FoundrySource.kindOf(tab.content.url),
+                        tabId = tab.id,
+                    )
+                }
+        }.distinctUntilChanged()
     }
 
     /** Waits for the page session of [tabId], or null if it doesn't come. */

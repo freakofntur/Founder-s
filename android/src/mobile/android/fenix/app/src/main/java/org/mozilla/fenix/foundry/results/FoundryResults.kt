@@ -32,12 +32,12 @@ object FoundryResults {
     }
 
     /**
-     * Opens [groupId] in the Group view if it is a search group; other groups keep Fenix's own view.
+     * Opens [groupId] in the Group view. Every group opens here, search groups and normal tab groups alike, so there is
+     * one kind of group (owner, 2026-11-25).
      *
-     * @return Whether it was opened.
+     * @return Whether it was opened (always, today; patch 0008 falls back to Fenix's own view otherwise).
      */
     fun openGroup(navController: NavController, groupId: String): Boolean {
-        if (!FoundrySearchGroups.isSearchGroup(navController.context, groupId)) return false
         showGroup(navController, groupId)
         return true
     }

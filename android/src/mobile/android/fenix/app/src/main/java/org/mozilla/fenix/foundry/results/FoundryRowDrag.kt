@@ -10,26 +10,38 @@ import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
+import androidx.compose.animation.core.AnimationState
+import androidx.compose.animation.core.DecayAnimationSpec
+import androidx.compose.animation.core.animateDecay
 import androidx.compose.foundation.pager.PagerState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
- * Moves one row of the Group view by a sideways drag, one window per swipe at most: past half a window, or a clear
- * flick. Used both by the row itself and by [SidewaysSwipeFrame] around each live page.
+ * Moves one row of the Group view by a sideways drag. Used both by the row itself and by [SidewaysSwipeFrame] around
+ * each live page.
  *
- * @param flingPxPerS A release faster than this moves the row on even after a short drag.
+ * @param snap Whether the row settles on a window after each swipe (the lower row: one window per swipe at most, past
+ *   half a window or a clear flick). Without it the row scrolls freely and keeps the finger's momentum, like a list
+ *   (the upper row, owner 2026-11-25).
+ * @param flingPxPerS For a snapping row, a release faster than this moves it on even after a short drag.
+ * @param decay How a free row slows down after a fling.
  */
 class FoundryRowDrag(
     private val state: PagerState,
     private val scope: CoroutineScope,
+    private val snap: Boolean,
     private val flingPxPerS: Float,
+    private val decay: DecayAnimationSpec<Float>,
 ) {
     private var start = 0
+    private var settling: Job? = null
 
-    /** A sideways drag started. */
+    /** A sideways drag started; it stops any fling or settling still running. */
     fun begin() {
+        settling?.cancel()
         start = state.currentPage
     }
 
@@ -40,6 +52,19 @@ class FoundryRowDrag(
 
     /** The finger lifted, moving sideways at [velocity] pixels per second. */
     fun end(velocity: Float) {
+        if (!snap) {
+            settling =
+                scope.launch {
+                    state.scroll {
+                        var last = 0f
+                        AnimationState(initialValue = 0f, initialVelocity = -velocity).animateDecay(decay) {
+                            scrollBy(value - last)
+                            last = value
+                        }
+                    }
+                }
+            return
+        }
         val moved = state.currentPage + state.currentPageOffsetFraction - start
         val target =
             when {
@@ -47,7 +72,7 @@ class FoundryRowDrag(
                 velocity > flingPxPerS || moved < -TURN_THRESHOLD -> start - 1
                 else -> start
             }
-        scope.launch { state.animateScrollToPage(target.coerceIn(0, state.pageCount - 1)) }
+        settling = scope.launch { state.animateScrollToPage(target.coerceIn(0, state.pageCount - 1)) }
     }
 
     companion object {
