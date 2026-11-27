@@ -81,9 +81,13 @@ logins work.
 - **Swipe left or right** anywhere on a row (even over a live page) to move that row by one window. Each row moves on
   its own. Pages never scroll sideways inside a window (owner's rule, 2026-11-20).
 - **Scroll up and down inside a window** to scroll that page without leaving the Group view.
-- **Open** on a window shows that tab as a Page. The group keeps its other windows as they were; Overview (or Back)
-  returns to it.
-- **Tap outside the panel** (on the dimmed Overview) or press Back to close the Group view.
+- **Open** on a window shows that tab as a Page. **Back on that Page returns to the Group view**, with both rows where
+  you left them (2026-11-28). The address bar's back swipe still goes back within the page.
+- **Tap outside the panel** (on the dimmed Overview) or press Back to close the Group view. The panel shrinks and fades
+  back into Overview; with gesture navigation it follows the back swipe (predictive back) and returns if you cancel.
+- **It is a normal tab group in Overview** (2026-11-28): rename, colour, close, delete, ungroup and add or move tabs
+  with Fenix's own tools. Closed or moved-out tabs leave the rows; tabs added to the group join them. A search group
+  whose tabs are all closed is deleted after the Undo message. Its card in Overview shows previews of its pages.
 - **The search box** at the bottom starts a new search group (tapping it selects the old query, so typing replaces it).
 - **The follow-up box in an AI window** sends the message to that AI only.
 
@@ -98,7 +102,10 @@ logins work.
   [after tapping outside](../references/group-view-panel-closed.png), [light](../references/group-view-light.png), [dark](../references/group-view-dark.png),
   [more sources](../references/group-view-more-sources.png), [Claude ask window](../references/group-view-claude-ask.png),
   [Overview with search groups](../references/overview-with-search-groups.png),
-  [Overview's groups page](../references/overview-groups-page.png).
+  [Overview's groups page](../references/overview-groups-page.png),
+  [Back from a Page returns to the Group view](../references/back-to-group-view.png),
+  [page previews in Overview](../references/overview-group-thumbnails.png),
+  [closing animation frames](../references/group-view-close-animation.png).
 
 ## Menus
 

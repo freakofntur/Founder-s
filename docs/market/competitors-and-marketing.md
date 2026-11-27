@@ -161,3 +161,36 @@ what Foundry does. Lead with one of the above.
 - **Weeks 6–10:** Google Play open testing; then Show HN and Product Hunt with the tagline "One search. Every answer.
   Side by side."
 - **After:** Pro tier tests once weekly use is steady; F-Droid; search-partner talks only with real numbers.
+
+## 4. Update 2026-11-28: mobile results screens, and where the Group view wins
+
+Short pass by Founder (now also the UI engineer) on what rivals do in their phone search and results screens.
+
+- **Chrome AI Mode (April 2026):** opens a cited source *beside* the AI answer instead of in a new tab, so the answer
+  stays in view ([Google](https://blog.google/products-and-platforms/products/search/ai-mode-chrome/),
+  [Android Authority](https://www.androidauthority.com/chrome-ai-mode-split-screen-3658218/)). Most reports describe the
+  split view as desktop-first. A "+" menu lets you attach open tabs to a question, and search across them, on mobile
+  too ([Chrome Unboxed](https://chromeunboxed.com/new-chrome-upgrade-brings-ai-mode-split-tabs-to-end-your-tab-switching-fatigue/)).
+  Takeaway: Google itself now says "keep the answer and its sources together". That is the Group view's whole idea, and
+  on a phone Foundry already shows the answer plus several sources at once.
+- **Perplexity Comet (Android since Nov 2025):** an assistant over your tabs: summaries of open tabs, voice, an ad
+  blocker, and you can watch the assistant act ([TechCrunch](https://www.techcrunch.com/2025/11/20/perplexity-brings-its-ai-browser-comet-to-android/),
+  [Android Central](https://www.androidcentral.com/apps-software/ai/perplexitys-comet-for-android-is-an-ai-browsing-companion-for-anything-online)).
+  One AI only (Perplexity).
+- **Opera for Android:** a big tab-management redesign: "Tab Islands" (groups that expand and collapse), recovering
+  closed tabs, and Aria answers with "Ask more" follow-ups ([Opera](https://blogs.opera.com/mobile/2026/02/your-guide-to-tab-management-opera-for-android/),
+  [Thurrott](https://www.thurrott.com/cloud/web-browsers/320539/opera-for-android-gets-a-big-tab-management-update)).
+  Takeaway: people like groups that behave like one thing (collapse, close, recover together).
+- **Brave:** Ask Brave answers with sources on the results page, Leo from the address bar, private and encrypted chats
+  ([Brave](https://brave.com/whats-new/), [Brave Leo](https://brave.com/leo/)). Again one AI.
+
+**Where Foundry's tab-group Results can win:**
+
+1. *Never lose the answer.* Reading a source must always come back to the group, exactly where you were. Chrome solved
+   this with a split view; on a phone, Foundry's version is "Back returns to the Group view at the same windows" (built
+   today).
+2. *A search is one thing.* It should look like one in Overview (real page previews, not bare icons), disappear when
+   you close its tabs, and use the browser's normal group tools (rename, colour, close), like Opera's islands (built
+   today).
+3. *Several AIs, side by side, with your logins.* Still nobody else does this on mobile. Next: a follow-up box that
+   asks the AI window you are looking at, and later "ask all".

@@ -489,11 +489,12 @@ Oldest first.
 
 - **Group view polish** (spec: `docs/design/service-tabs.md`):
   - The owner tests it on the phone (logged in to Claude and ChatGPT).
-  - Back from a Page opened from the Group view should return to the Group view (today Back goes through the page's
-    own history first; Claude's logged-out redirect loop traps it).
-  - Overview thumbnails of search groups are only icons (Fenix takes thumbnails of selected tabs only).
-  - Empty search groups (all tabs closed) stay listed in Overview with "0 tabs"; clean them up.
+  - Done 2026-11-28 (fc788b5, 96ecfa8, c32a845, 4acb23b): Back from a Page returns to the Group view; search groups
+    follow Fenix's native groups and empty ones are deleted; animated close plus predictive back; page previews in
+    Overview's group cards. Waiting for QA.
+  - Overview's card shows the first four tabs; the AI Mode tab (L0) has no preview until L0 is shown once.
   - A follow-up typed in an AI window goes to that AI only.
+  - Closing could shrink into the group's own card in Overview (needs the card's position from Fenix's tray).
 - **Two menus**, whose positions may change:
   - `>`: profile, saved and active tabs, reading lists.
   - `⋮`: a traditional browser menu.
