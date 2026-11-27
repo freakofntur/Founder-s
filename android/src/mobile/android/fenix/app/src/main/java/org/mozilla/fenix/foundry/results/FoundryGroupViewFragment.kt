@@ -5,6 +5,7 @@
 package org.mozilla.fenix.foundry.results
 
 import android.app.Dialog
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
@@ -110,8 +111,10 @@ import androidx.fragment.compose.content
 import androidx.navigation.fragment.findNavController
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import mozilla.components.browser.state.action.ContentAction
 import mozilla.components.browser.state.selector.findTab
 import mozilla.components.concept.engine.EngineSession
 import mozilla.components.concept.engine.EngineView
@@ -296,6 +299,7 @@ class FoundryGroupViewFragment : DialogFragment() {
 
     /** Lets go of every page first, so the browser screen can show this tab's page. */
     private fun openPage(tabId: String) {
+        liveViews.forEach { (view, id) -> pageBitmap(view)?.let { saveThumbnail(requireContext(), id, it) } }
         liveViews.keys.toList().forEach { it.release() }
         liveViews.clear()
         requireComponents.useCases.tabsUseCases.selectTab(tabId)
@@ -307,7 +311,10 @@ class FoundryGroupViewFragment : DialogFragment() {
     private fun freeze() {
         if (frozen) return
         liveViews.forEach { (view, tabId) ->
-            pageBitmap(view)?.let { pictures[tabId] = it.asImageBitmap() }
+            pageBitmap(view)?.let {
+                pictures[tabId] = it.asImageBitmap()
+                saveThumbnail(requireContext(), tabId, it)
+            }
             view.asView().visibility = View.INVISIBLE
         }
         frozen = true
@@ -689,6 +696,22 @@ private fun WindowPage(
         return
     }
     val liveId = id ?: return
+    var liveView by remember(current) { mutableStateOf<EngineView?>(null) }
+    // Overview's card for a group shows its tabs' thumbnails, but the browser only takes them of the selected tab:
+    // take one of each window a moment after its page has loaded.
+    LaunchedEffect(liveId, liveView) {
+        val view = liveView ?: return@LaunchedEffect
+        context.components.core.store
+            .flow()
+            .map { it.findTab(liveId)?.content?.loading }
+            .distinctUntilChanged()
+            .collectLatest { loading ->
+                if (loading == false) {
+                    delay(THUMBNAIL_DELAY_MS)
+                    pageBitmap(view)?.let { saveThumbnail(context, liveId, it) }
+                }
+            }
+    }
     val rowDrag = LocalRowDrag.current
     key(current) {
         AndroidView(
@@ -705,6 +728,7 @@ private fun WindowPage(
                     // Still shown by another view; it shows here the next time this window is shown.
                 }
                 liveViews[view] = liveId
+                liveView = view
                 SidewaysSwipeFrame(viewContext, rowDrag).apply { addView(view.asView()) }
             },
             update = { frame -> frame.rowDrag = rowDrag },
@@ -724,6 +748,14 @@ private fun WindowPage(
             contentScale = ContentScale.FillBounds,
         )
     }
+}
+
+/** How long after a window's page has loaded before its thumbnail is taken, so it has drawn. */
+private const val THUMBNAIL_DELAY_MS = 1_500L
+
+/** Stores [bitmap] as [tabId]'s thumbnail, as the browser does for the selected tab, so Overview can show it. */
+private fun saveThumbnail(context: Context, tabId: String, bitmap: Bitmap) {
+    context.components.core.store.dispatch(ContentAction.UpdateThumbnailAction(tabId, bitmap))
 }
 
 /** A still picture of what a live page shows now, read from the TextureView it draws into; null if it has none yet. */
