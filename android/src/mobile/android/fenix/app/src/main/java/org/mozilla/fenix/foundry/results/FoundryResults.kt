@@ -42,10 +42,38 @@ object FoundryResults {
         return true
     }
 
-    /** Shows the Group view as a panel over Overview, opening Overview under it first if it isn't open. */
+    /** The tab last opened as a Page from the Group view, and its group (see [backToGroup]). */
+    private var openedFromGroup: Pair<String, String>? = null
+
+    /** Remembers that [tabId] was opened as a Page from the Group view of [groupId]. */
+    fun pageOpenedFromGroup(tabId: String, groupId: String) {
+        openedFromGroup = tabId to groupId
+    }
+
+    /**
+     * Back on a Page opened from the Group view returns to the Group view, instead of going back through the page's own
+     * history first (a logged-out AI site's redirects trapped Back there). The address bar's back swipe still goes
+     * back within the page. Called from the browser screen's Back handling (patch 0009).
+     *
+     * @return Whether Back was handled.
+     */
+    fun backToGroup(navController: NavController, selectedTabId: String?): Boolean {
+        val (tabId, groupId) = openedFromGroup ?: return false
+        openedFromGroup = null
+        if (tabId != selectedTabId) return false
+        showGroup(navController, groupId)
+        return true
+    }
+
+    /**
+     * Shows the Group view as a panel over Overview: goes back to Overview if it is under the current screen (a Page
+     * opened from it), or opens Overview first if it isn't open.
+     */
     private fun showGroup(navController: NavController, groupId: String) {
         val overviewOpen = runCatching { navController.getBackStackEntry(R.id.tabManagementFragment) }.isSuccess
-        if (!overviewOpen) {
+        if (overviewOpen) {
+            navController.popBackStack(R.id.tabManagementFragment, false)
+        } else {
             navController.navigate(
                 R.id.tabManagementFragment,
                 null,

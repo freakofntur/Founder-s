@@ -1,0 +1,20 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
+index d66038ce02..a85c279190 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
+@@ -228,6 +228,7 @@ import org.mozilla.fenix.ext.runIfFragmentIsAttached
+ import org.mozilla.fenix.ext.secure
+ import org.mozilla.fenix.ext.tabClosedUndoMessage
+ import org.mozilla.fenix.ext.updateMicrosurveyPromptForConfigurationChange
++import org.mozilla.fenix.foundry.results.FoundryResults
+ import org.mozilla.fenix.messaging.FenixMessageSurfaceId
+ import org.mozilla.fenix.messaging.MessagingFeature
+ import org.mozilla.fenix.microsurvey.ui.MicrosurveyRequestPrompt
+@@ -2094,6 +2095,7 @@ abstract class BaseBrowserFragment :
+         return findInPageIntegration.onBackPressed() ||
+             fullScreenFeature.onBackPressed() ||
+             promptsFeature.onBackPressed() ||
++            FoundryResults.backToGroup(findNavController(), requireComponents.core.store.state.selectedTabId) ||
+             sessionFeature.onBackPressed() ||
+             lastTabFeature.onBackPressed()
+     }

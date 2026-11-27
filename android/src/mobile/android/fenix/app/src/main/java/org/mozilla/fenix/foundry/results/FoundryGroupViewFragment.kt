@@ -58,6 +58,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
@@ -180,6 +181,7 @@ class FoundryGroupViewFragment : DialogFragment() {
                     when {
                         search != null ->
                             GroupView(
+                                groupId = groupId,
                                 rows = search.rows(),
                                 opening = FoundryRows.OPENING_INDEX,
                                 openAtStart = search.hasNoSources,
@@ -194,6 +196,7 @@ class FoundryGroupViewFragment : DialogFragment() {
                                 GoneMessage()
                             } else {
                                 GroupView(
+                                    groupId = groupId,
                                     rows = FoundryRows.forTabs(plain),
                                     opening = 0,
                                     openAtStart = false,
@@ -251,6 +254,7 @@ class FoundryGroupViewFragment : DialogFragment() {
         liveViews.toList().forEach { it.release() }
         liveViews.clear()
         requireComponents.useCases.tabsUseCases.selectTab(tabId)
+        FoundryResults.pageOpenedFromGroup(tabId, groupId)
         findNavController().navigate(R.id.browserFragment)
     }
 
@@ -280,6 +284,7 @@ private val CARD_SHAPE = RoundedCornerShape(16.dp)
 
 @Composable
 private fun GroupView(
+    groupId: String,
     rows: FoundryRows,
     opening: Int,
     openAtStart: Boolean,
@@ -287,14 +292,20 @@ private fun GroupView(
     onSubmit: (String) -> Unit,
     window: @Composable (slot: String, window: FoundryWindow?, isShown: Boolean, modifier: Modifier) -> Unit,
 ) {
-    val upper = rememberPagerState(initialPage = opening) { rows.upper.size }
-    val lower = rememberPagerState(initialPage = opening) { rows.lower.size }
-    KeepOpeningUntilMoved(upper, opening, rows.upper.size)
-    KeepOpeningUntilMoved(lower, opening, rows.lower.size)
+    // Coming back to a group (Back from one of its Pages) opens the rows where you left them.
+    val saved = remember(groupId) { rowPositions[groupId] }
+    val upper = rememberPagerState(initialPage = saved?.first ?: opening) { rows.upper.size }
+    val lower = rememberPagerState(initialPage = saved?.second ?: opening) { rows.lower.size }
+    val upperMoved = KeepOpeningUntilMoved(upper, opening, rows.upper.size, alreadyMoved = saved != null)
+    val lowerMoved = KeepOpeningUntilMoved(lower, opening, rows.lower.size, alreadyMoved = saved != null)
+    LaunchedEffect(upper, lower) {
+        snapshotFlow { Triple(upper.settledPage, lower.settledPage, upperMoved.value || lowerMoved.value) }
+            .collect { (u, l, moved) -> if (moved) rowPositions[groupId] = u to l }
+    }
 
     // A search whose answer cited nothing: open on Google's own windows instead of the empty source windows.
     LaunchedEffect(openAtStart) {
-        if (openAtStart) {
+        if (openAtStart && saved == null) {
             if (upper.currentPage == opening) upper.animateScrollToPage(0)
             if (lower.currentPage == opening) lower.animateScrollToPage(0)
         }
@@ -336,16 +347,19 @@ private fun GroupView(
  * A group opens before Google's AI answer has been read: the row may hold one window at first (so the pager clamps to
  * window 0), and sources inserted later shift the windows by index. Without this the row opened on U0, or on U2 and U3,
  * instead of U1 and U2.
+ *
+ * @param alreadyMoved The row reopens where the person left it, so it must not be pulled back to [opening].
+ * @return Whether the person has moved the row.
  */
 @Composable
-private fun KeepOpeningUntilMoved(state: PagerState, opening: Int, size: Int) {
-    var moved by remember(state) { mutableStateOf(false) }
+private fun KeepOpeningUntilMoved(state: PagerState, opening: Int, size: Int, alreadyMoved: Boolean): State<Boolean> {
+    val moved = remember(state) { mutableStateOf(alreadyMoved) }
     var aligning by remember(state) { mutableStateOf(false) }
     LaunchedEffect(state) {
-        snapshotFlow { state.isScrollInProgress }.collect { scrolling -> if (scrolling && !aligning) moved = true }
+        snapshotFlow { state.isScrollInProgress }.collect { scrolling -> if (scrolling && !aligning) moved.value = true }
     }
     LaunchedEffect(state, size) {
-        if (moved || size <= opening) return@LaunchedEffect
+        if (moved.value || size <= opening) return@LaunchedEffect
         val target = opening.coerceAtMost(size - 1)
         if (state.currentPage != target || state.currentPageOffsetFraction != 0f) {
             aligning = true
@@ -356,7 +370,11 @@ private fun KeepOpeningUntilMoved(state: PagerState, opening: Int, size: Int) {
             }
         }
     }
+    return moved
 }
+
+/** Where each group's rows were last left (upper, lower), for this run of the app. */
+private val rowPositions = HashMap<String, Pair<Int, Int>>()
 
 /**
  * The windows of a free-scrolling row that are more than half on screen. Only these load their pages, so the windows
