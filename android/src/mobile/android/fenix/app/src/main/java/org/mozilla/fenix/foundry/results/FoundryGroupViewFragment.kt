@@ -906,6 +906,8 @@ private fun SearchBar(query: String, onSubmit: (String) -> Unit) {
             onValueChange = { text = it },
             modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused },
             singleLine = true,
+            // Plain tab groups have no search of their own, so say what the box does.
+            placeholder = { Text(text = "Search for something new") },
             shape = RoundedCornerShape(30.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions =
