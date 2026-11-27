@@ -18,6 +18,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.rememberSplineBasedDecay
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -75,7 +76,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -94,6 +97,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
+import androidx.core.view.children
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.compose.content
 import androidx.navigation.fragment.findNavController
@@ -110,6 +114,7 @@ import org.mozilla.fenix.R
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.requireComponents
 import org.mozilla.fenix.theme.FirefoxTheme
+import org.mozilla.geckoview.GeckoView
 
 /**
  * The Group view: one search group laid out in two rows of live windows, named U0, U1, … (the upper row of tall
@@ -219,12 +224,8 @@ class FoundryGroupViewFragment : DialogFragment() {
         }
     }
 
-    /**
-     * Closes the panel with its animation (tap outside, Back). Web pages draw on their own surface, which ignores the
-     * panel's fade and shrink, so they are hidden first and the cards animate with their own backgrounds.
-     */
+    /** Closes the panel with its animation (tap outside, Back). */
     private fun close() {
-        liveViews.forEach { it.asView().visibility = View.INVISIBLE }
         closing = true
     }
 
@@ -597,6 +598,10 @@ private fun WindowPage(groupId: String, window: FoundryWindow, show: Boolean, li
             modifier = Modifier.fillMaxSize(),
             factory = { viewContext ->
                 val view = context.components.core.engine.createView(viewContext)
+                // Draw through a TextureView, not Gecko's default SurfaceView: a SurfaceView ignores the panel's
+                // clipping and fade, so pages drew outside the panel's edge and stayed solid while it closed.
+                (view.asView() as? ViewGroup)?.children?.filterIsInstance<GeckoView>()?.firstOrNull()
+                    ?.setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW)
                 try {
                     view.render(current)
                 } catch (e: IllegalStateException) {
@@ -663,7 +668,7 @@ private fun GoneMessage() {
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = "This search group was closed.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text = "This group has no open tabs.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -682,15 +687,48 @@ private fun Badge(window: FoundryWindow?, size: Dp) {
             window.kind == FoundrySource.Kind.IMAGE -> Triple("▣", colors.tertiary, colors.onTertiary)
             else ->
                 Triple(
-                    host(window.url).take(1).uppercase(),
+                    siteName(host(window.url)).take(1).uppercase(),
                     MaterialTheme.colorScheme.secondaryContainer,
                     MaterialTheme.colorScheme.onSecondaryContainer,
                 )
         }
+    val icon = rememberTabIcon(window?.tabId)
     Box(modifier = Modifier.size(size).clip(CircleShape).background(background), contentAlignment = Alignment.Center) {
-        Text(text = glyph, color = foreground, maxLines = 1, fontSize = (size.value * 0.42f).sp)
+        if (icon != null) {
+            Image(bitmap = icon, contentDescription = null, modifier = Modifier.fillMaxSize().padding(size / 6))
+        } else {
+            Text(text = glyph, color = foreground, maxLines = 1, fontSize = (size.value * 0.42f).sp)
+        }
     }
 }
+
+/** The site icon of a window's tab once the page has given one, so plain tabs show their site, not a letter. */
+@Composable
+private fun rememberTabIcon(tabId: String?): ImageBitmap? {
+    val context = LocalContext.current
+    val icon by produceState<ImageBitmap?>(initialValue = null, tabId) {
+        if (tabId == null) return@produceState
+        context.components.core.store
+            .flow()
+            .map { it.findTab(tabId)?.content?.icon }
+            .distinctUntilChanged()
+            .collect { bitmap -> value = bitmap?.asImageBitmap() }
+    }
+    return icon
+}
+
+/**
+ * The part of a host people recognise: "in.trip.com" gives "trip", "www.bbc.co.uk" gives "bbc". Used for a window's
+ * letter while its site icon hasn't loaded.
+ */
+private fun siteName(host: String): String {
+    val labels = host.split('.').filter { it.isNotEmpty() }
+    if (labels.size < 2) return host
+    val secondLevel = labels[labels.size - 2]
+    return if (secondLevel in SECOND_LEVEL_SUFFIXES && labels.size >= 3) labels[labels.size - 3] else secondLevel
+}
+
+private val SECOND_LEVEL_SUFFIXES = setOf("co", "com", "org", "net", "ac", "gov", "edu")
 
 private val CLAUDE_ORANGE = Color(0xFFD97757)
 private val VIDEO_RED = Color(0xFFE62117)
