@@ -440,6 +440,10 @@ Oldest first.
 
 ## Working with the owner
 
+- **Who does what (owner's decision, 2026-11-28):** the **Founder** agent (`.claude/agents/founder.md`) does market
+  research and marketing, and is the UI and feature engineer: it designs, builds and pushes screens and features. The
+  **main Claude session** does quality checks: it tests Founder's work on the emulator and phone, fixes small bugs, and
+  sends bigger problems back to Founder.
 - **Keep Notion in sync with the work, always.** The owner's Notion page "Foundry browser" (use the Notion connector)
   is the shared vision board. Claude may edit it freely: add, change or remove features, and add screenshots and
   inspiration. Whenever work happens, update it in the same session so it matches reality:
