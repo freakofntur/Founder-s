@@ -5,15 +5,18 @@
 package org.mozilla.fenix.foundry.results
 
 import android.app.Dialog
+import android.graphics.Bitmap
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import androidx.activity.BackEventCompat
 import androidx.activity.ComponentDialog
-import androidx.activity.addCallback
+import androidx.activity.OnBackPressedCallback
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -65,6 +68,8 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -81,6 +86,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -142,7 +148,18 @@ class FoundryGroupViewFragment : DialogFragment() {
     private var pagesAllowed by mutableStateOf(false)
 
     /** The page views on screen, so [openPage] can hand their pages over without removing views mid-frame. */
-    private val liveViews = mutableSetOf<EngineView>()
+    private val liveViews = mutableMapOf<EngineView, String>()
+
+    /**
+     * While the panel closes (or follows a back swipe), each live page is swapped for a still picture of itself
+     * ([pictures], by tab id): redrawing live pages every frame of the shrink was too slow, so the panel stayed still
+     * and then vanished instead of animating.
+     */
+    private var frozen by mutableStateOf(false)
+    private val pictures = mutableStateMapOf<String, ImageBitmap>()
+
+    /** How far a back swipe has gone (0 to 1); the panel shrinks with it, like Android's predictive back. */
+    private var backDrag by mutableFloatStateOf(0f)
 
     /** Set when the panel should close: [Overlay] plays the closing animation, then dismisses. */
     private var closing by mutableStateOf(false)
@@ -150,7 +167,23 @@ class FoundryGroupViewFragment : DialogFragment() {
     /** A full-screen, see-through window: [Overlay] draws the dimmed surround and the panel itself. */
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog =
         ComponentDialog(requireContext(), android.R.style.Theme_Translucent_NoTitleBar).apply {
-            onBackPressedDispatcher.addCallback(this@FoundryGroupViewFragment) { close() }
+            onBackPressedDispatcher.addCallback(
+                this@FoundryGroupViewFragment,
+                object : OnBackPressedCallback(true) {
+                    override fun handleOnBackStarted(backEvent: BackEventCompat) = freeze()
+
+                    override fun handleOnBackProgressed(backEvent: BackEventCompat) {
+                        backDrag = backEvent.progress
+                    }
+
+                    override fun handleOnBackCancelled() {
+                        backDrag = 0f
+                        unfreeze()
+                    }
+
+                    override fun handleOnBackPressed() = close()
+                },
+            )
             window?.apply {
                 setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
                 setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -176,7 +209,12 @@ class FoundryGroupViewFragment : DialogFragment() {
                 val tabs by produceState<FoundryGroupTabs?>(initialValue = null, groupId) {
                     FoundrySearchGroups.tabsOf(context, groupId).collect { value = it }
                 }
-                Overlay(closing = closing, onOutside = ::close, onClosed = ::dismissAllowingStateLoss) {
+                Overlay(
+                    closing = closing,
+                    backDrag = backDrag,
+                    onOutside = ::close,
+                    onClosed = ::dismissAllowingStateLoss,
+                ) {
                     val plain = tabs?.tabs
                     when {
                         search != null ->
@@ -223,12 +261,19 @@ class FoundryGroupViewFragment : DialogFragment() {
             onOpen = { tabId -> openPage(tabId) },
             onAsk = { w -> FoundrySearchGroups.ensureTab(requireContext(), groupId, w) },
         ) { w ->
-            WindowPage(groupId = groupId, window = w, show = isShown && pagesAllowed, liveViews = liveViews)
+            WindowPage(
+                groupId = groupId,
+                window = w,
+                show = isShown && pagesAllowed,
+                picture = if (frozen) w.tabId?.let { pictures[it] } else null,
+                liveViews = liveViews,
+            )
         }
     }
 
     /** Closes the panel with its animation (tap outside, Back). */
     private fun close() {
+        freeze()
         closing = true
     }
 
@@ -251,11 +296,28 @@ class FoundryGroupViewFragment : DialogFragment() {
 
     /** Lets go of every page first, so the browser screen can show this tab's page. */
     private fun openPage(tabId: String) {
-        liveViews.toList().forEach { it.release() }
+        liveViews.keys.toList().forEach { it.release() }
         liveViews.clear()
         requireComponents.useCases.tabsUseCases.selectTab(tabId)
         FoundryResults.pageOpenedFromGroup(tabId, groupId)
         findNavController().navigate(R.id.browserFragment)
+    }
+
+    /** Swaps every live page for a picture of itself (see [frozen]). */
+    private fun freeze() {
+        if (frozen) return
+        liveViews.forEach { (view, tabId) ->
+            pageBitmap(view)?.let { pictures[tabId] = it.asImageBitmap() }
+            view.asView().visibility = View.INVISIBLE
+        }
+        frozen = true
+    }
+
+    /** Shows the live pages again after a back swipe was cancelled. */
+    private fun unfreeze() {
+        if (!frozen || closing) return
+        liveViews.keys.forEach { it.asView().visibility = View.VISIBLE }
+        frozen = false
     }
 
     private companion object {
@@ -471,7 +533,13 @@ private fun Modifier.sidewaysSwipes(rowDrag: FoundryRowDrag): Modifier =
  * [onClosed] runs.
  */
 @Composable
-private fun Overlay(closing: Boolean, onOutside: () -> Unit, onClosed: () -> Unit, panel: @Composable () -> Unit) {
+private fun Overlay(
+    closing: Boolean,
+    backDrag: Float,
+    onOutside: () -> Unit,
+    onClosed: () -> Unit,
+    panel: @Composable () -> Unit,
+) {
     var opened by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { opened = true }
     val progress by animateFloatAsState(
@@ -495,7 +563,8 @@ private fun Overlay(closing: Boolean, onOutside: () -> Unit, onClosed: () -> Uni
                 Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        val scale = PANEL_START_SCALE + (1f - PANEL_START_SCALE) * progress
+                        val scale =
+                            (PANEL_START_SCALE + (1f - PANEL_START_SCALE) * progress) * (1f - BACK_SHRINK * backDrag)
                         scaleX = scale
                         scaleY = scale
                         alpha = progress
@@ -514,6 +583,9 @@ private fun Overlay(closing: Boolean, onOutside: () -> Unit, onClosed: () -> Uni
 
 /** How long the panel takes to open or close. */
 private const val PANEL_ANIMATION_MS = 260
+
+/** How much smaller the panel gets at the end of a back swipe, before it closes. */
+private const val BACK_SHRINK = 0.1f
 
 /** The panel's size when it starts opening or finishes closing, as a share of its full size. */
 private const val PANEL_START_SCALE = 0.86f
@@ -590,7 +662,13 @@ private fun WindowCard(
  * composed: removing a page view in the middle of a swipe crashes Compose, and keeping it avoids reloading.
  */
 @Composable
-private fun WindowPage(groupId: String, window: FoundryWindow, show: Boolean, liveViews: MutableSet<EngineView>) {
+private fun WindowPage(
+    groupId: String,
+    window: FoundryWindow,
+    show: Boolean,
+    picture: ImageBitmap?,
+    liveViews: MutableMap<EngineView, String>,
+) {
     val context = LocalContext.current
     var tabId by remember(window.key) { mutableStateOf<String?>(null) }
     LaunchedEffect(window.key, show) {
@@ -610,6 +688,7 @@ private fun WindowPage(groupId: String, window: FoundryWindow, show: Boolean, li
         Placeholder(window = window, text = label(window))
         return
     }
+    val liveId = id ?: return
     val rowDrag = LocalRowDrag.current
     key(current) {
         AndroidView(
@@ -625,7 +704,7 @@ private fun WindowPage(groupId: String, window: FoundryWindow, show: Boolean, li
                 } catch (e: IllegalStateException) {
                     // Still shown by another view; it shows here the next time this window is shown.
                 }
-                liveViews += view
+                liveViews[view] = liveId
                 SidewaysSwipeFrame(viewContext, rowDrag).apply { addView(view.asView()) }
             },
             update = { frame -> frame.rowDrag = rowDrag },
@@ -637,6 +716,21 @@ private fun WindowPage(groupId: String, window: FoundryWindow, show: Boolean, li
             },
         )
     }
+    if (picture != null) {
+        Image(
+            bitmap = picture,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.FillBounds,
+        )
+    }
+}
+
+/** A still picture of what a live page shows now, read from the TextureView it draws into; null if it has none yet. */
+internal fun pageBitmap(view: EngineView): Bitmap? {
+    fun find(v: View): TextureView? =
+        v as? TextureView ?: (v as? ViewGroup)?.children?.firstNotNullOfOrNull { find(it) }
+    return find(view.asView())?.takeIf { it.isAvailable }?.bitmap
 }
 
 /** An AI window before it is asked: what you searched, the AI's symbol, and an Ask button. */
