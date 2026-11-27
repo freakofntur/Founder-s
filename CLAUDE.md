@@ -124,7 +124,8 @@ Which Firefox files each patch edits, and which of Foundry's own files in `andro
 | 0005 taller-address-bar | android-components `compose/browser-toolbar/.../ui/FullDisplayToolbar.kt` and `BrowserEditToolbar.kt`; `res/values/dimens.xml` | 84 dp toolbar with a 60 dp pill |
 | 0006 foundry-crash-log | `java/.../FenixApplication.kt`, `java/.../HomeActivity.kt` (own file: `java/.../foundry/FoundryCrashLog.kt`) | Records crashes and shows them with a Copy button on next launch |
 | 0007 service-tabs | `res/navigation/nav_graph.xml`, `java/.../search/BrowserToolbarSearchMiddleware.kt`, `java/.../search/FenixSearchMiddleware.kt` (own files: `java/.../foundry/results/*`, `assets/extensions/foundry/*`) | Searches start a search group and open the Group view |
-| 0008 search-groups-in-tabs-view | `java/.../tabstray/ui/TabManagementFragment.kt` | Tapping a search group in Overview opens the Group view (other groups keep Fenix's view) |
+| 0008 search-groups-in-tabs-view | `java/.../tabstray/ui/TabManagementFragment.kt` | Tapping any group in Overview opens the Group view; Overview starts the empty-group clean-up |
+| 0009 back-to-group-view | `java/.../browser/BaseBrowserFragment.kt` | Back on a Page opened from the Group view returns to the Group view |
 
 ### Making a change
 
@@ -354,8 +355,22 @@ Spec: `docs/design/service-tabs.md`, "Results as a tab group". Code: `java/.../f
 - **Panel over Overview (owner, 2026-11-20):** `FoundryGroupViewFragment` is a `<dialog>` destination (patch 0007's
   nav graph). `FoundryResults.showGroup` opens Overview first if needed, then the panel on top. A full-screen
   see-through dialog draws a dim scrim (tap = close) around a rounded panel; no header.
-- **Open** releases every page view first, selects the tab and goes to the browser (a Page). Navigating to the browser
-  closes the dialog, so Back from the Page returns to Overview with the group highlighted.
+- **Open** releases every page view first, selects the tab and goes to the browser (a Page). **Back from that Page
+  returns to the Group view** (patch 0009, `FoundryResults.backToGroup`), with the rows where you left them
+  (`rowPositions`, for this run of the app). The address bar's back swipe still goes back within the page.
+- **One group system: Fenix's native tab groups (decided by Founder, 2026-11-28).** Fenix already has full tab groups
+  in Overview: create (button, menu, multi-select "Add to group", drag a tab onto a tab), rename and colour ("Edit"),
+  close (put away, reopenable), delete (closes its tabs), ungroup, and closing single tabs with Undo. A search group
+  *is* one of these (same id); Foundry's JSON only adds the layout (which tab is U0, L0, an AI window…) and the windows
+  not yet opened. So:
+  - **Keep all native group tools** as they are: rename, colour, close/reopen, delete, ungroup, add or move tabs.
+    Opening a closed group (from its card) reopens it, as Fenix's own view does.
+  - **The native group decides membership.** A window whose tab was closed or moved to another group leaves the rows
+    (an AI window goes back to its Ask card); a tab added to a search group in Overview joins the rows after the
+    search's own windows (pages above, videos and images below). `FoundrySearchGroup.rows(FoundryGroupTabs)`.
+  - **Empty search groups are deleted** 8 s after their last tab closes (after the Undo message), and leftovers on
+    start-up (`FoundrySearchGroups.cleanUpEmptyGroups`, started from Overview and the Group view).
+  - Not used: Fenix's own expanded group screen (the Group view replaces it for every group).
 
 ## Decision log (confirmed by the owner; don't regress)
 

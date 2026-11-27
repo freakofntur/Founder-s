@@ -16,12 +16,15 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import mozilla.components.browser.state.action.EngineAction
 import mozilla.components.browser.state.selector.findTab
@@ -96,26 +99,66 @@ data class FoundrySearchGroup(
     val sourcesRead: Boolean,
     val created: Long,
 ) {
-    private fun window(role: FoundryWindow.Role) = windows.first { it.role == role }
+    /**
+     * Places the windows in the U and L rows (see `docs/design/service-tabs.md`, "What goes where").
+     *
+     * The browser's tab group decides what is in the group ([live]): a window whose tab was closed or moved to another
+     * group leaves the rows (an AI window goes back to its Ask card instead), and tabs added to the group in Overview
+     * join the rows after the search's own windows, pages above and videos and images below.
+     */
+    fun rows(live: FoundryGroupTabs? = null): FoundryRows {
+        val placed = windows.mapNotNullTo(HashSet()) { it.tabId }
+        val kept =
+            windows.mapNotNull { w ->
+                when {
+                    live == null || w.tabId == null || live.holds(w.tabId) -> w
+                    w.isAskWindow -> w.copy(tabId = null)
+                    else -> null
+                }
+            }
+        fun window(role: FoundryWindow.Role) = kept.firstOrNull { it.role == role }
+        val ai = listOfNotNull(window(FoundryWindow.Role.AI_MODE))
+        val google = listOfNotNull(window(FoundryWindow.Role.GOOGLE))
+        val asks = listOfNotNull(window(FoundryWindow.Role.CLAUDE), window(FoundryWindow.Role.CHATGPT))
+        val added = live?.tabs.orEmpty().filter { it.tabId !in placed }
+        val addedPages = added.filter { it.kind == FoundrySource.Kind.PAGE }
+        val addedMedia = added.filter { it.kind != FoundrySource.Kind.PAGE }
+        if (!sourcesRead) {
+            return FoundryRows(upper = google + listOf(null, null) + addedPages, lower = ai + null + asks + addedMedia)
+        }
 
-    /** Places the windows in the U and L rows (see `docs/design/service-tabs.md`, "What goes where"). */
-    fun rows(): FoundryRows {
-        val ai = window(FoundryWindow.Role.AI_MODE)
-        val google = window(FoundryWindow.Role.GOOGLE)
-        val asks = listOf(window(FoundryWindow.Role.CLAUDE), window(FoundryWindow.Role.CHATGPT))
-        if (!sourcesRead) return FoundryRows(upper = listOf(google, null, null), lower = listOf(ai, null) + asks)
-
-        val sources = windows.filter { it.role == FoundryWindow.Role.SOURCE }
+        val sources = kept.filter { it.role == FoundryWindow.Role.SOURCE }
         val media = sources.filter { it.kind != FoundrySource.Kind.PAGE }
         val pages = sources.filter { it.kind == FoundrySource.Kind.PAGE }
         val lowerSources = media.ifEmpty { pages.take(1) }
         val upperSources = if (media.isEmpty()) pages.drop(1) else pages
-        return FoundryRows(upper = listOf(google) + upperSources, lower = listOf(ai) + lowerSources + asks)
+        return FoundryRows(
+            upper = google + upperSources + addedPages,
+            lower = ai + lowerSources + asks + addedMedia,
+        )
     }
 
     /** Whether the answer was read and cited nothing, so the view should open on Google's own windows instead. */
     val hasNoSources: Boolean
         get() = sourcesRead && windows.none { it.role == FoundryWindow.Role.SOURCE }
+}
+
+/**
+ * What the browser's own tab group holds right now, for laying out a search group by it.
+ *
+ * @param tabs The group's open tabs as windows, in tab order.
+ * @param open Every open tab's id.
+ * @param elsewhere Ids of tabs that belong to another group.
+ * @param restored Whether the browser has restored its tabs; before that no tab counts as closed.
+ */
+data class FoundryGroupTabs(
+    val tabs: List<FoundryWindow>,
+    val open: Set<String>,
+    val elsewhere: Set<String>,
+    val restored: Boolean,
+) {
+    /** Whether [tabId] is still open and still in this group. */
+    fun holds(tabId: String): Boolean = !restored || (tabId in open && tabId !in elsewhere)
 }
 
 /**
@@ -138,6 +181,9 @@ object FoundrySearchGroups {
     private const val SESSION_TIMEOUT_MS = 10_000L
 
     private const val GROUP_THEME = "Blue"
+
+    /** How long an emptied search group waits before it is deleted: a little longer than the "Undo" message shows. */
+    private const val UNDO_GRACE_MS = 8_000L
 
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -209,28 +255,86 @@ object FoundrySearchGroups {
     }
 
     /**
-     * The tabs of any tab group as windows, in the browser's tab order, kept up to date as tabs are added, closed or
-     * change page. An empty list means the group is gone or has no open tabs.
+     * What the browser's tab group [groupId] holds, kept up to date as tabs are added, closed, moved or change page.
+     * Empty [FoundryGroupTabs.tabs] means the group is gone or has no open tabs.
      */
     @MainThread
-    fun tabsOf(context: Context, groupId: String): Flow<List<FoundryWindow>> {
+    fun tabsOf(context: Context, groupId: String): Flow<FoundryGroupTabs> {
         val components = context.components
         return combine(components.core.tabGroupRepository.tabGroupDataFlow, components.core.store.flow()) { data, state ->
             val ids = data.tabGroups.firstOrNull { it.id == groupId }?.tabIds?.toSet().orEmpty()
-            state.tabs
-                .filter { it.id in ids }
-                .map { tab ->
-                    FoundryWindow(
-                        key = "tab:${tab.id}",
-                        role = FoundryWindow.Role.TAB,
-                        url = tab.content.url,
-                        title = tab.content.title,
-                        kind = FoundrySource.kindOf(tab.content.url),
-                        tabId = tab.id,
-                    )
-                }
+            FoundryGroupTabs(
+                tabs =
+                    state.tabs
+                        .filter { it.id in ids }
+                        .map { tab ->
+                            FoundryWindow(
+                                key = "tab:${tab.id}",
+                                role = FoundryWindow.Role.TAB,
+                                url = tab.content.url,
+                                title = tab.content.title,
+                                kind = FoundrySource.kindOf(tab.content.url),
+                                tabId = tab.id,
+                            )
+                        },
+                open = state.tabs.mapTo(HashSet()) { it.id },
+                elsewhere = data.tabGroupAssignments.filterValues { it != groupId }.keys,
+                restored = state.restoreComplete,
+            )
         }.distinctUntilChanged()
     }
+
+    /**
+     * Reopens [groupId] if Overview's "close group" had put it away, as the browser's own group view does, and starts
+     * [cleanUpEmptyGroups].
+     */
+    @MainThread
+    fun reopen(context: Context, groupId: String) {
+        val app = context.applicationContext
+        cleanUpEmptyGroups(app)
+        scope.launch(io) {
+            val repository = app.components.core.tabGroupRepository
+            if (repository.tabGroupDataFlow.first().tabGroups.any { it.id == groupId && it.closed }) {
+                repository.openTabGroup(groupId)
+            }
+        }
+    }
+
+    /**
+     * Deletes search groups whose tabs have all been closed, so Overview doesn't keep listing them with "0 tabs". It
+     * waits [UNDO_GRACE_MS] first, because closing a tab can be undone and the tab should come back to its group. Runs
+     * for the life of the app once started.
+     */
+    @MainThread
+    fun cleanUpEmptyGroups(context: Context) {
+        if (cleaning) return
+        cleaning = true
+        val app = context.applicationContext
+        val components = app.components
+        scope.launch {
+            components.core.store.flow().first { it.restoreComplete }
+            combine(components.core.tabGroupRepository.tabGroupDataFlow, components.core.store.flow(), state) {
+                    data,
+                    browser,
+                    searches,
+                ->
+                val open = browser.tabs.mapTo(HashSet()) { it.id }
+                data.tabGroups
+                    .filter { g -> !g.closed && searches?.containsKey(g.id) == true && g.tabIds.none { it in open } }
+                    .map { it.id }
+                    .toSet()
+            }
+                .distinctUntilChanged()
+                .collectLatest { empty ->
+                    if (empty.isEmpty()) return@collectLatest
+                    delay(UNDO_GRACE_MS)
+                    withContext(io) { components.core.tabGroupRepository.deleteTabGroupsById(empty.toList()) }
+                    forget(app, empty)
+                }
+        }
+    }
+
+    private var cleaning = false
 
     /** Waits for the page session of [tabId], or null if it doesn't come. */
     suspend fun awaitSession(context: Context, tabId: String): EngineSession? =
@@ -289,6 +393,14 @@ object FoundrySearchGroups {
             if (added.isEmpty() && group.sourcesRead) return@update group
             group.copy(windows = group.windows + added, sourcesRead = true)
         }
+    }
+
+    private fun forget(context: Context, ids: Set<String>) {
+        val all = load(context)
+        if (ids.none { it in all }) return
+        val left = all - ids
+        state.value = left
+        save(context, left)
     }
 
     private fun put(context: Context, group: FoundrySearchGroup) {

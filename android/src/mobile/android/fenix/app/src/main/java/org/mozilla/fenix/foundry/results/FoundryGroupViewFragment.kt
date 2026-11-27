@@ -173,16 +173,16 @@ class FoundryGroupViewFragment : DialogFragment() {
                 val context = LocalContext.current
                 val searchGroups by FoundrySearchGroups.groups(context).collectAsState()
                 val search = searchGroups?.get(groupId)
-                val tabs by produceState<List<FoundryWindow>?>(initialValue = null, groupId) {
+                val tabs by produceState<FoundryGroupTabs?>(initialValue = null, groupId) {
                     FoundrySearchGroups.tabsOf(context, groupId).collect { value = it }
                 }
                 Overlay(closing = closing, onOutside = ::close, onClosed = ::dismissAllowingStateLoss) {
-                    val plain = tabs
+                    val plain = tabs?.tabs
                     when {
                         search != null ->
                             GroupView(
                                 groupId = groupId,
-                                rows = search.rows(),
+                                rows = search.rows(tabs),
                                 opening = FoundryRows.OPENING_INDEX,
                                 openAtStart = search.hasNoSources,
                                 query = search.query,

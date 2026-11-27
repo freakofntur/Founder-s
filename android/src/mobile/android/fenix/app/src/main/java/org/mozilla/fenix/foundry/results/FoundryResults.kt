@@ -27,6 +27,7 @@ object FoundryResults {
     fun openIfSearch(navController: NavController, text: String, private: Boolean): Boolean {
         val query = text.trim()
         if (private || query.isEmpty() || query.isUrl()) return false
+        FoundrySearchGroups.cleanUpEmptyGroups(navController.context)
         showGroup(navController, FoundrySearchGroups.start(navController.context, query))
         return true
     }
@@ -38,6 +39,7 @@ object FoundryResults {
      * @return Whether it was opened (always, today; patch 0008 falls back to Fenix's own view otherwise).
      */
     fun openGroup(navController: NavController, groupId: String): Boolean {
+        FoundrySearchGroups.reopen(navController.context, groupId)
         showGroup(navController, groupId)
         return true
     }
